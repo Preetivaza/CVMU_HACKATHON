@@ -1,4 +1,4 @@
-# Road Damage Intelligence & Risk Mapping System - Backend Design
+# Road Damage Detection & Risk Mapping System - Backend Design
 
 ## System Architecture Overview
 
@@ -615,3 +615,4 @@ Member 1 must send detections via `POST /api/v1/detections/bulk` with:
 ```
 severity_score = confidence × bbox_area_ratio × (0.5 + normalized_acceleration × 0.5)
 ```
+
