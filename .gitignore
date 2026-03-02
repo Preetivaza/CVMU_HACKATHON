@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+ml-service/venv/
+ml-service/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+frontend/.env.local
+ml-service/.env
+
+# Build outputs
+.next/
+frontend/.next/
+out/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Uploads (keep directory but ignore files)
+frontend/public/uploads/*
+!frontend/public/uploads/.gitkeep
+
+# Python
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+
+# Misc
+*.bak
+*.tmp
