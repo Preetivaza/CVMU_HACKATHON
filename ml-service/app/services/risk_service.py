@@ -4,27 +4,7 @@ from bson import ObjectId
 
 from app.core.config import settings
 from app.core.database import get_collection, Collections
-
-
-def get_risk_level(score: float) -> str:
-    """Get risk level from score."""
-    if score >= 0.85:
-        return "Critical"
-    elif score >= 0.70:
-        return "High"
-    elif score >= 0.50:
-        return "Medium"
-    return "Low"
-
-
-def calculate_final_risk(avg_severity: float, aging_index: Optional[float], repeat_count: int) -> float:
-    """Calculate final risk score using the formula from the plan."""
-    aging = aging_index if aging_index is not None else 0.5  # Default aging index
-    
-    if repeat_count > settings.REPEAT_THRESHOLD:
-        return settings.RISK_WEIGHT_SEVERITY_REPEAT * avg_severity + settings.RISK_WEIGHT_AGING_REPEAT * aging
-    else:
-        return settings.RISK_WEIGHT_SEVERITY_NORMAL * avg_severity + settings.RISK_WEIGHT_AGING_NORMAL * aging
+from app.models.risk_model import RiskModel
 
 
 async def recalculate_risk(
@@ -63,22 +43,20 @@ async def recalculate_risk(
     for cluster in clusters:
         props = cluster["properties"]
         
-        # Calculate new risk score
-        final_risk = calculate_final_risk(
+        # Calculate new risk score using ML Model
+        risk_result = RiskModel.calculate(
             props["avg_severity"],
             props.get("aging_index"),
             props.get("repeat_count", 1)
         )
-        
-        risk_level = get_risk_level(final_risk)
         
         # Update cluster
         await clusters_col.update_one(
             {"_id": cluster["_id"]},
             {
                 "$set": {
-                    "properties.final_risk_score": round(final_risk, 4),
-                    "properties.risk_level": risk_level,
+                    "properties.final_risk_score": risk_result.final_risk_score,
+                    "properties.risk_level": risk_result.risk_level,
                     "updated_at": datetime.utcnow()
                 }
             }
@@ -123,14 +101,12 @@ async def update_aging_index(cluster_id: str, aging_index: float) -> Dict[str, A
     
     props = cluster["properties"]
     
-    # Calculate new risk with updated aging index
-    final_risk = calculate_final_risk(
+    # Calculate new risk with updated aging index using ML Model
+    risk_result = RiskModel.calculate(
         props["avg_severity"],
         aging_index,
         props.get("repeat_count", 1)
     )
-    
-    risk_level = get_risk_level(final_risk)
     
     # Update cluster
     await clusters_col.update_one(
@@ -138,8 +114,8 @@ async def update_aging_index(cluster_id: str, aging_index: float) -> Dict[str, A
         {
             "$set": {
                 "properties.aging_index": round(aging_index, 4),
-                "properties.final_risk_score": round(final_risk, 4),
-                "properties.risk_level": risk_level,
+                "properties.final_risk_score": risk_result.final_risk_score,
+                "properties.risk_level": risk_result.risk_level,
                 "updated_at": datetime.utcnow()
             }
         }
@@ -148,7 +124,69 @@ async def update_aging_index(cluster_id: str, aging_index: float) -> Dict[str, A
     return {
         "status": "completed",
         "cluster_id": cluster_id,
-        "new_risk_score": round(final_risk, 4),
-        "risk_level": risk_level,
+        "new_risk_score": risk_result.final_risk_score,
+        "risk_level": risk_result.risk_level,
         "message": "Aging index updated and risk recalculated"
     }
+
+
+async def update_repair_status(
+    cluster_id: str, 
+    status: str,
+    notes: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Update repair status for a cluster and handle lifecycle closure.
+    If status is 'repaired', risk is dropped to 0 and aging is reset.
+    """
+    clusters_col = get_collection(Collections.CLUSTERS)
+    
+    cluster = await clusters_col.find_one({"_id": ObjectId(cluster_id)})
+    if not cluster:
+        return {"status": "error", "message": "Cluster not found"}
+
+    props = cluster["properties"]
+    
+    # If repaired, we reset aging index as well
+    new_aging = 0.0 if status.lower() == "repaired" else props.get("aging_index")
+    
+    # Calculate new risk
+    risk_result = RiskModel.calculate(
+        avg_severity=props["avg_severity"],
+        aging_index=new_aging,
+        repeat_count=props.get("repeat_count", 1),
+        status=status
+    )
+
+    # Prepare repair history entry
+    history_entry = {
+        "status": status,
+        "changed_at": datetime.utcnow(),
+        "notes": notes or "Status updated via management system."
+    }
+
+    # Update database
+    await clusters_col.update_one(
+        {"_id": ObjectId(cluster_id)},
+        {
+            "$set": {
+                "properties.status": status,
+                "properties.aging_index": new_aging,
+                "properties.final_risk_score": risk_result.final_risk_score,
+                "properties.risk_level": risk_result.risk_level,
+                "updated_at": datetime.utcnow()
+            },
+            "$push": {
+                "properties.repair_history": history_entry
+            }
+        }
+    )
+
+    return {
+        "status": "completed",
+        "cluster_id": cluster_id,
+        "new_status": status,
+        "new_risk_score": risk_result.final_risk_score,
+        "message": f"Cluster marked as {status}. Risk loop closed."
+    }
+

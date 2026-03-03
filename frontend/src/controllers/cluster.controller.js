@@ -12,6 +12,8 @@ import { ClusterModel } from '@/models/cluster.model';
 import { DetectionModel } from '@/models/detection.model';
 import { HTTP_STATUS, REPAIR_STATUSES, PAGINATION, ML_SERVICE_URL } from '@/utils/constants';
 import { isValidObjectId } from '@/utils/validators';
+import { verifyAuth } from '@/lib/auth';
+import { UserModel } from '@/models/user.model';
 
 export class ClusterController {
   /** GET /api/v1/clusters */
@@ -23,6 +25,26 @@ export class ClusterController {
     const query = {};
     if (searchParams.get('risk_level')) query['properties.risk_level'] = searchParams.get('risk_level');
     if (searchParams.get('status')) query['properties.status'] = searchParams.get('status');
+
+    // --- SMART DATA MASKING (Member 3 Requirement) ---
+    const { isValid, user: tokenUser } = await verifyAuth(request);
+    if (isValid) {
+      const user = await UserModel.findById(tokenUser.userId);
+      
+      if (user.role === 'zone_officer' && user.authority_zone) {
+        // Only see risks within their assigned Polygon/Ward
+        query.geometry = { 
+          $geoWithin: { $geometry: user.authority_zone } 
+        };
+      } else if (user.role === 'state_authority') {
+        // State level only cares about Highways
+        query['road_type'] = 'highway';
+      } else if (user.role === 'contractor') {
+        // Contractors only see roads they are assigned to
+        query['properties.assigned_to_user_id'] = user._id.toString();
+      }
+      // city_admin sees everything (no additional filter)
+    }
 
     const minScore = parseFloat(searchParams.get('min_risk_score'));
     const maxScore = parseFloat(searchParams.get('max_risk_score'));
@@ -36,7 +58,7 @@ export class ClusterController {
     const maxLon = parseFloat(searchParams.get('max_lon'));
     const minLat = parseFloat(searchParams.get('min_lat'));
     const maxLat = parseFloat(searchParams.get('max_lat'));
-    if (!isNaN(minLon) && !isNaN(maxLon) && !isNaN(minLat) && !isNaN(maxLat)) {
+    if (!isNaN(minLon) && !isNaN(maxLon) && !isNaN(minLat) && !isNaN(maxLat) && !query.geometry) {
       query.geometry = { $geoWithin: { $box: [[minLon, minLat], [maxLon, maxLat]] } };
     }
 
@@ -108,7 +130,29 @@ export class ClusterController {
         notes: body.notes || '',
       };
       await ClusterModel.updateStatus(id, body.status, historyEntry);
-    } else {
+
+      // --- ML SYNC (Member 3 Requirement) ---
+      // Notify the ML Service to reset risk/aging if 'repaired'
+      try {
+        await fetch(`${ML_SERVICE_URL}/ml/risk/update-status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cluster_id: id,
+            status: body.status,
+            notes: body.notes || 'Status updated via Frontend Management System'
+          })
+        });
+      } catch (err) {
+        console.warn(`[ML Sync] Failed to notify ML service about status update for ${id}:`, err.message);
+      }
+    } 
+
+    if (body.assigned_to_user_id) {
+      await ClusterModel.updateById(id, { 'properties.assigned_to_user_id': body.assigned_to_user_id });
+    }
+    
+    if (!body.status && !body.assigned_to_user_id) {
       await ClusterModel.updateById(id, {});
     }
 

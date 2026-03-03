@@ -24,13 +24,14 @@ async def analyze_satellite_imagery(request: SatelliteAnalysisRequest):
         )
         
         if result["status"] == "error":
+            print(f"[Satellite Router] Service Error: {result}")
             raise HTTPException(status_code=400, detail=result["message"])
             
         return SatelliteAnalysisResponse(
             status=result["status"],
             cluster_id=result["cluster_id"],
-            aging_index=result["aging_index"],
-            analysis_date=result["analysis_date"],
+            aging_index=result.get("aging_index"),
+            trend=result.get("trend"),
             message=result["message"]
         )
         

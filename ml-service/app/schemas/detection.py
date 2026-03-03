@@ -143,7 +143,7 @@ class UserDocument(BaseModel):
 
 class DetectionProperties(BaseModel):
     """Properties of a single detection Feature (from Member 1 AI engine)."""
-    video_id: str
+    video_id: Optional[str]                        = None
     frame_id: Optional[int]                        = None
     timestamp: Optional[datetime]                  = None
     damage_type: DamageType
@@ -199,8 +199,15 @@ class ClusteringRequest(BaseModel):
     min_samples: Optional[int]     = None   # override default 3
 
 
+class PotholeSummaryItem(BaseModel):
+    id: str
+    centroid: List[float]
+    damage_type: str
+    final_risk_score: float
+
 class ClusteringResponse(BaseModel):
     status: str
     clusters_created: int
     detections_processed: int
     message: str
+    pothole_summary: List[PotholeSummaryItem] = []

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import asyncio
 import os
 from pprint import pprint
@@ -50,3 +51,53 @@ async def test():
 
 if __name__ == "__main__":
     asyncio.run(test())
+=======
+import ee
+import json
+import os
+
+def test_gee_connection():
+    print("--- Google Earth Engine Connection Test ---")
+    
+    # Path to service account JSON
+    gee_json_path = 'gee-service-account.json'
+    
+    if not os.path.exists(gee_json_path):
+        print(f"Error: Credentials file '{gee_json_path}' not found.")
+        return
+    
+    try:
+        # Load credentials to get the email
+        with open(gee_json_path, 'r') as f:
+            creds = json.load(f)
+            service_account = creds.get('client_email')
+            
+        print(f"Using service account: {service_account}")
+        
+        # Initialize GEE
+        credentials = ee.ServiceAccountCredentials(service_account, gee_json_path)
+        ee.Initialize(credentials)
+        
+        # Test: Fetch SRTM elevation data for a single point
+        print("Connected! Testing data fetch...")
+        point = ee.Geometry.Point([77.2090, 28.6139]) # Delhi
+        srtm = ee.Image('USGS/SRTMGL1_003')
+        elevation = srtm.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=point,
+            scale=30
+        ).getInfo()
+        
+        print(f"Success! Elevation at Delhi: {elevation.get('elevation')} meters")
+        print("GEE is working properly.")
+        
+    except Exception as e:
+        print(f"GEE Initialization failed: {str(e)}")
+        print("\nPossible issues:")
+        print("1. Service account doesn't have GEE API enabled.")
+        print("2. Service account hasn't been registered for Earth Engine access.")
+        print("3. Network/proxy issues.")
+
+if __name__ == "__main__":
+    test_gee_connection()
+>>>>>>> 731845e (cluster DBSCAN done)
