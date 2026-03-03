@@ -38,3 +38,26 @@ __pycache__/
 !*.schema.json
 !*.metadata.json
 !test_results.json
+
+# Uploads (keep directory but ignore files)
+frontend/public/uploads/*
+!frontend/public/uploads/.gitkeep
+
+# Python
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+
+# Misc
+*.bak
+*.tmp
+
+# Road Detection
+road_detection/yolov8s.pt
+road_detection/test_data/
+road_detection/*_damage_report.json
+road_detection/.DOCUMENTATION.md
+
+# Virtual environment
+CMVU_Hackathon/
