@@ -17,12 +17,12 @@ export class ClusterController {
   /** GET /api/v1/clusters */
   static async list(request) {
     const { searchParams } = new URL(request.url);
-    const page  = parseInt(searchParams.get('page'))  || PAGINATION.DEFAULT_PAGE;
+    const page = parseInt(searchParams.get('page')) || PAGINATION.DEFAULT_PAGE;
     const limit = Math.min(parseInt(searchParams.get('limit')) || PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
 
     const query = {};
     if (searchParams.get('risk_level')) query['properties.risk_level'] = searchParams.get('risk_level');
-    if (searchParams.get('status'))     query['properties.status']     = searchParams.get('status');
+    if (searchParams.get('status')) query['properties.status'] = searchParams.get('status');
 
     const minScore = parseFloat(searchParams.get('min_risk_score'));
     const maxScore = parseFloat(searchParams.get('max_risk_score'));

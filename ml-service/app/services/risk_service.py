@@ -106,7 +106,14 @@ async def update_aging_index(cluster_id: str, aging_index: float) -> Dict[str, A
     """
     clusters_col = get_collection(Collections.CLUSTERS)
     
-    cluster = await clusters_col.find_one({"_id": ObjectId(cluster_id)})
+    try:
+        obj_id = ObjectId(cluster_id)
+        cluster = await clusters_col.find_one({"_id": obj_id})
+    except Exception:
+        return {
+            "status": "error",
+            "message": "Invalid cluster_id format"
+        }
     
     if not cluster:
         return {
