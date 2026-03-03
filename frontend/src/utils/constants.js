@@ -11,7 +11,7 @@ export const RISK_LEVELS = ['Low', 'Medium', 'High', 'Critical'];
 export const REPAIR_STATUSES = ['pending', 'scheduled', 'in_progress', 'repaired', 'verified'];
 
 // User roles
-export const USER_ROLES = ['admin', 'operator', 'viewer'];
+export const USER_ROLES = ['city_admin', 'zone_officer', 'state_authority', 'contractor', 'viewer'];
 
 // Video upload statuses
 export const VIDEO_STATUSES = ['uploaded', 'processing', 'completed', 'failed'];

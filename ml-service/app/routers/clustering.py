@@ -27,7 +27,8 @@ async def trigger_clustering(request: ClusteringRequest):
             status=result["status"],
             clusters_created=result["clusters_created"],
             detections_processed=result["detections_processed"],
-            message=result["message"]
+            message=result["message"],
+            pothole_summary=result.get("pothole_summary", [])
         )
         
     except Exception as e:

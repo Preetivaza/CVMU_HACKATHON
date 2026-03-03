@@ -1,50 +1,40 @@
-# Dependencies
+# Secrets & Keys
+gee-service-account.json
+*.pem
+*.key
+.env*
+security/
+
+# Datasets & Large Files
+data/
+datasets/
+*.csv
+*.xlsx
+*.xls
+*.sqlite
+*.mp4
+*.mov
+*.avi
+
+# Build & OS
 node_modules/
-frontend/node_modules/
-ml-service/venv/
-ml-service/__pycache__/
-**/__pycache__/
-*.pyc
-
-# Environment files
-.env
-.env.local
-.env.*.local
-!.env.example
-frontend/.env.local
-ml-service/.env
-
-# Build outputs
 .next/
-frontend/.next/
-out/
 dist/
 build/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
 .DS_Store
 Thumbs.db
+__pycache__/
+*.pyc
 
-# Logs
-*.log
-npm-debug.log*
+# Local Config Overrides
+*.local.js
+*.local.json
 
-# Uploads (keep directory but ignore files)
-frontend/public/uploads/*
-!frontend/public/uploads/.gitkeep
-
-# Python
-*.egg-info/
-.eggs/
-*.egg
-.pytest_cache/
-
-# Misc
-*.bak
-*.tmp
+# Exceptions (Keep these)
+!package.json
+!tsconfig.json
+!jsconfig.json
+!manifest.json
+!*.schema.json
+!*.metadata.json
+!test_results.json

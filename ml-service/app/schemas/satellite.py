@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 
 from app.schemas.detection import GeoJSONPoint
@@ -48,5 +48,6 @@ class SatelliteAnalysisResponse(BaseModel):
     status: str
     cluster_id: str
     aging_index: Optional[float] = None
-    analysis_date: datetime
+    trend: Optional[Dict[str, float]] = None
+    analysis_date: datetime = Field(default_factory=datetime.utcnow)
     message: str

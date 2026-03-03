@@ -1,10 +1,10 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import clustering, risk, satellite
-from app.core.config import settings
-from app.core.database import connect_to_mongo, close_mongo_connection
 
+from app.routers import clustering, risk, satellite, detections
+from app.core.config import settings
+from app.core.database import connect_to_mongo, close_mongo_connection, get_database
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -13,7 +13,6 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     await close_mongo_connection()
-
 
 app = FastAPI(
     lifespan=lifespan,
@@ -33,10 +32,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
+# Include ML routers
 app.include_router(clustering.router, prefix="/ml/clustering", tags=["Clustering"])
 app.include_router(risk.router, prefix="/ml/risk", tags=["Risk"])
 app.include_router(satellite.router, prefix="/ml/satellite", tags=["Satellite"])
+
+# Include the Detections router (For Member 1's AI data)
+app.include_router(detections.router)
 
 
 @app.get("/")
@@ -48,9 +50,20 @@ async def root():
     }
 
 
+# Health Check to verify Atlas connection
 @app.get("/ml/health")
-async def health_check():
+async def health_check(db = Depends(get_database)):
+    db_status = "disconnected"
+    try:
+        # Ping the database to ensure active connection
+        if db is not None:
+            await db.command('ping')
+            db_status = "connected"
+    except Exception as e:
+        print(f"Health check DB ping failed: {e}")
+
     return {
-        "status": "healthy",
+        "status": "healthy" if db_status == "connected" else "degraded",
         "service": "ml-service",
+        "database": db_status
     }

@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 
 from app.schemas import RiskCalculationRequest, RiskCalculationResponse
-from app.services.risk_service import recalculate_risk, update_aging_index
+from app.services.risk_service import recalculate_risk, update_aging_index, update_repair_status
 
 router = APIRouter()
 
@@ -11,6 +11,12 @@ router = APIRouter()
 class AgingIndexUpdate(BaseModel):
     cluster_id: str
     aging_index: float = Field(..., ge=0, le=1)
+
+
+class RepairStatusUpdate(BaseModel):
+    cluster_id: str
+    status: str
+    notes: Optional[str] = None
 
 
 @router.post("/calculate", response_model=RiskCalculationResponse)
@@ -54,6 +60,30 @@ async def update_cluster_aging(request: AgingIndexUpdate):
         if result["status"] == "error":
             raise HTTPException(status_code=404, detail=result["message"])
         
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/update-status")
+async def update_cluster_status(request: RepairStatusUpdate):
+    """
+    Update repair status for a cluster (pending, in_progress, repaired).
+    If 'repaired', the ML engine resets risk to 0.0.
+    """
+    try:
+        result = await update_repair_status(
+            cluster_id=request.cluster_id,
+            status=request.status,
+            notes=request.notes
+        )
+        
+        if result["status"] == "error":
+            raise HTTPException(status_code=404, detail=result["message"])
+            
         return result
         
     except HTTPException:

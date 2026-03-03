@@ -1,265 +1,370 @@
+"""
+clustering_service.py — Pipeline orchestrator
+===============================================
+Full DBSCAN clustering pipeline:
+
+  Step 1 → Fetch unprocessed raw detections from MongoDB
+  Step 2 → Group detections by damage_type
+  Step 3 → For each group, run DBSCAN with the correct per-type radius:
+              pothole  → eps = 5 m
+              crack    → eps = 12 m
+              others   → eps = 10 m (default)
+  Step 4 → For each cluster:
+              a. Compute centroid, radius, avg severity, avg confidence
+              b. Check if a cluster already exists nearby (repeat detection)
+              c. Calculate final risk score using the Risk Model
+              d. Insert new cluster OR increment repeat_count of existing one
+  Step 5 → Write cluster_id back to each detection and mark processed=True
+"""
+
 import numpy as np
-from sklearn.cluster import DBSCAN
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from bson import ObjectId
 
 from app.core.config import settings
 from app.core.database import get_collection, Collections
-
-
-def haversine_distance(coord1: List[float], coord2: List[float]) -> float:
-    """Calculate haversine distance between two coordinates in meters."""
-    R = 6371000  # Earth's radius in meters
-    
-    lon1, lat1 = np.radians(coord1)
-    lon2, lat2 = np.radians(coord2)
-    
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    
-    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
-    c = 2 * np.arcsin(np.sqrt(a))
-    
-    return R * c
-
-
-def get_risk_level(score: float) -> str:
-    """Get risk level from score."""
-    if score >= 0.85:
-        return "Critical"
-    elif score >= 0.70:
-        return "High"
-    elif score >= 0.50:
-        return "Medium"
-    return "Low"
-
-
-def calculate_final_risk(avg_severity: float, aging_index: Optional[float], repeat_count: int) -> float:
-    """Calculate final risk score using the formula from the plan."""
-    aging = aging_index if aging_index is not None else 0.5  # Default aging index
-    
-    if repeat_count > settings.REPEAT_THRESHOLD:
-        return settings.RISK_WEIGHT_SEVERITY_REPEAT * avg_severity + settings.RISK_WEIGHT_AGING_REPEAT * aging
-    else:
-        return settings.RISK_WEIGHT_SEVERITY_NORMAL * avg_severity + settings.RISK_WEIGHT_AGING_NORMAL * aging
+from app.models.clustering_model import DBSCANClusteringModel, DAMAGE_TYPE_RADIUS
+from app.models.risk_model import RiskModel
+from app.services import satellite_service
 
 
 async def run_clustering(
     video_id: Optional[str] = None,
     force_recluster: bool = False,
-    eps_meters: Optional[float] = None,
-    min_samples: Optional[int] = None
+    eps_meters: Optional[float] = None,    # Global override (ignores per-type radii)
+    min_samples: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Run DBSCAN clustering on raw detections.
-    
-    Args:
-        video_id: Optional video ID to filter detections
-        force_recluster: If True, re-cluster already processed detections
-        eps_meters: DBSCAN epsilon parameter in meters
-        min_samples: DBSCAN minimum samples parameter
-    
-    Returns:
-        Dictionary with clustering results
+    Run the full DBSCAN clustering pipeline on raw road-damage detections.
+
+    Args
+    ----
+    video_id        : Limit clustering to one video's detections (None = all).
+    force_recluster : If True, re-cluster detections that were already processed.
+    eps_meters      : Optional global radius override (uses per-type radius if None).
+    min_samples     : DBSCAN min_samples. Defaults to 1 so single points form clusters.
+
+    Returns
+    -------
+    dict with status, clusters_created, detections_processed, and per-type breakdown.
     """
-    eps = eps_meters or settings.DBSCAN_EPS_METERS
-    min_samp = min_samples or settings.DBSCAN_MIN_SAMPLES
-    
+
+    # ── Defaults ──────────────────────────────────────────────────────────────
+    min_samp = min_samples if min_samples is not None else 1
+
     detections_col = get_collection(Collections.RAW_DETECTIONS)
-    clusters_col = get_collection(Collections.CLUSTERS)
-    
-    # Build query for detections
-    query = {}
+    clusters_col   = get_collection(Collections.CLUSTERS)
+
+    # ── Step 1: Fetch detections ───────────────────────────────────────────────
+    query: Dict = {}
     if video_id:
         query["properties.video_id"] = video_id
     if not force_recluster:
         query["processed"] = False
-    
-    # Fetch detections
+
     detections = await detections_col.find(query).to_list(length=None)
-    
-    if len(detections) < min_samp:
+
+    if not detections:
         return {
             "status": "skipped",
             "clusters_created": 0,
-            "detections_processed": len(detections),
-            "message": f"Not enough detections for clustering (need at least {min_samp})"
+            "detections_processed": 0,
+            "message": "No unprocessed detections found.",
         }
-    
-    # Extract coordinates
-    coordinates = []
-    for det in detections:
-        coords = det["geometry"]["coordinates"]
-        coordinates.append([coords[0], coords[1]])  # [lon, lat]
-    
-    coordinates = np.array(coordinates)
-    
-    # Convert to radians for haversine
-    coords_rad = np.radians(coordinates)
-    
-    # Run DBSCAN with haversine metric
-    # eps needs to be converted from meters to radians
-    eps_rad = eps / 6371000  # Convert meters to radians
-    
-    clustering = DBSCAN(
-        eps=eps_rad,
-        min_samples=min_samp,
-        metric='haversine',
-        algorithm='ball_tree'
-    )
-    
-    labels = clustering.fit_predict(coords_rad)
-    
-    # Group detections by cluster
-    clusters_created = 0
-    unique_labels = set(labels)
-    
-    for label in unique_labels:
-        if label == -1:  # Noise points
-            continue
-        
-        # Get indices of detections in this cluster
-        cluster_mask = labels == label
-        cluster_indices = np.where(cluster_mask)[0]
-        
-        if len(cluster_indices) < min_samp:
-            continue
-        
-        # Get cluster detections
-        cluster_detections = [detections[i] for i in cluster_indices]
-        
-        # Calculate cluster properties
-        cluster_coords = coordinates[cluster_mask]
-        centroid = cluster_coords.mean(axis=0)
-        
-        # Calculate radius (max distance from centroid)
-        max_distance = 0
-        for coord in cluster_coords:
-            dist = haversine_distance(centroid.tolist(), coord.tolist())
-            max_distance = max(max_distance, dist)
-        
-        # Calculate average severity and confidence
-        severities = [d["properties"]["severity_score"] for d in cluster_detections]
-        confidences = [d["properties"]["confidence"] for d in cluster_detections]
-        avg_severity = np.mean(severities)
-        avg_confidence = np.mean(confidences)
-        
-        # Count damage types
-        damage_types = {}
-        for d in cluster_detections:
-            dt = d["properties"]["damage_type"]
-            damage_types[dt] = damage_types.get(dt, 0) + 1
-        
-        # Get detection IDs
-        detection_ids = [d["_id"] for d in cluster_detections]
-        
-        # Get timestamps
-        timestamps = [d["properties"].get("timestamp") or d.get("created_at") for d in cluster_detections]
-        timestamps = [t for t in timestamps if t is not None]
-        first_detected = min(timestamps) if timestamps else datetime.utcnow()
-        last_detected = max(timestamps) if timestamps else datetime.utcnow()
-        
-        # Check for existing cluster at same location (for repeat_count)
-        existing = await clusters_col.find_one({
-            "geometry": {
-                "$near": {
-                    "$geometry": {
-                        "type": "Point",
-                        "coordinates": centroid.tolist()
-                    },
-                    "$maxDistance": eps  # Within eps meters
-                }
-            }
-        })
-        
-        repeat_count = 1
-        if existing:
-            repeat_count = existing["properties"].get("repeat_count", 1) + 1
-        
-        # Calculate final risk
-        final_risk = calculate_final_risk(avg_severity, None, repeat_count)
-        risk_level = get_risk_level(final_risk)
-        
-        # Create cluster document
-        cluster_doc = {
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": centroid.tolist()
-            },
-            "properties": {
-                "detection_ids": detection_ids,
-                "points_count": len(cluster_detections),
-                "radius_meters": max_distance,
-                "avg_severity": round(avg_severity, 4),
-                "avg_confidence": round(avg_confidence, 4),
-                "damage_types": damage_types,
-                "aging_index": None,  # Will be set by satellite analysis
-                "final_risk_score": round(final_risk, 4),
-                "risk_level": risk_level,
-                "repeat_count": repeat_count,
-                "status": "pending",
-                "repair_history": []
-            },
-            "road_id": None,
-            "area_id": None,
-            "first_detected": first_detected,
-            "last_detected": last_detected,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-        
-        # Insert or update cluster
-        if existing:
-            await clusters_col.update_one(
-                {"_id": existing["_id"]},
-                {
-                    "$set": {
-                        "properties.detection_ids": list(set(
-                            [str(d) for d in existing["properties"]["detection_ids"]] + 
-                            [str(d) for d in detection_ids]
-                        )),
-                        "properties.points_count": existing["properties"]["points_count"] + len(cluster_detections),
-                        "properties.avg_severity": round((existing["properties"]["avg_severity"] + avg_severity) / 2, 4),
-                        "properties.avg_confidence": round((existing["properties"]["avg_confidence"] + avg_confidence) / 2, 4),
-                        "properties.repeat_count": repeat_count,
-                        "properties.final_risk_score": round(final_risk, 4),
-                        "properties.risk_level": risk_level,
-                        "last_detected": last_detected,
-                        "updated_at": datetime.utcnow()
-                    }
-                }
-            )
-            cluster_id = existing["_id"]
+
+    print(f"[Clustering] Fetched {len(detections)} detections.")
+
+    # ── Step 2: Group by damage_type ──────────────────────────────────────────
+    groups = DBSCANClusteringModel.group_by_damage_type(detections)
+    print(f"[Clustering] Damage-type groups: { {k: len(v) for k, v in groups.items()} }")
+
+    # ── Step 3 + 4 + 5: Cluster each group ────────────────────────────────────
+    total_clusters_created = 0
+    total_processed        = 0
+    per_type_summary       = {}
+    session_cluster_ids    = set()
+
+    for damage_type, group_detections in groups.items():
+
+        print(f"[Clustering] Processing '{damage_type}': {len(group_detections)} detections")
+
+        # 3a. Build model — use global override or per-type radius
+        if eps_meters:
+            model = DBSCANClusteringModel(eps_meters=eps_meters, min_samples=min_samp)
         else:
-            result = await clusters_col.insert_one(cluster_doc)
-            cluster_id = result.inserted_id
-            clusters_created += 1
-        
-        # Update detections with cluster reference
-        await detections_col.update_many(
-            {"_id": {"$in": detection_ids}},
+            model = DBSCANClusteringModel.for_damage_type(damage_type, min_samples=min_samp)
+
+        print(f"[Clustering]  → eps = {model.eps_meters} m  (converted: {model._eps_rad:.8f} rad)")
+
+        # 3b. Extract [lon, lat] tuples for DBSCAN
+        coordinates = [
+            (det["geometry"]["coordinates"][0], det["geometry"]["coordinates"][1])
+            for det in group_detections
+        ]
+
+        # 3c. Run DBSCAN
+        result = model.fit_predict(coordinates)
+        labels = result.labels
+
+        print(f"[Clustering]  → {result.n_clusters} cluster(s), {result.noise_count} noise point(s)")
+
+        # ── Step 4: Process each cluster label ────────────────────────────────
+        group_clusters_created = 0
+
+        for label in set(labels):
+            #  Label -1 → noise (isolated detection). Still mark as processed.
+            is_noise = label == -1
+
+            cluster_indices  = [i for i, l in enumerate(labels) if l == label]
+            cluster_dets     = [group_detections[i] for i in cluster_indices]
+            cluster_coords   = [coordinates[i] for i in cluster_indices]
+
+            # 4a. Cluster geometry
+            centroid     = model.compute_centroid(cluster_coords)
+            max_radius   = model.compute_radius(centroid, cluster_coords) if not is_noise else 0.0
+
+            # 4b. Aggregate stats
+            severities   = [d["properties"].get("severity_score", 0.5) for d in cluster_dets]
+            confidences  = [d["properties"].get("confidence", 0.5)     for d in cluster_dets]
+            avg_severity = float(np.mean(severities))
+            avg_conf     = float(np.mean(confidences))
+
+            damage_type_counts: Dict[str, int] = {}
+            for d in cluster_dets:
+                dt = d["properties"].get("damage_type", "unknown")
+                damage_type_counts[dt] = damage_type_counts.get(dt, 0) + 1
+
+            detection_ids = [d["_id"] for d in cluster_dets]
+
+            timestamps = [
+                d["properties"].get("timestamp") or d.get("created_at")
+                for d in cluster_dets
+            ]
+            timestamps    = [t for t in timestamps if t]
+            first_detected = min(timestamps) if timestamps else datetime.utcnow()
+            last_detected  = max(timestamps) if timestamps else datetime.utcnow()
+
+            # ── TEMPORAL CHECK: Calculate current session unique days ──
+            session_days = {t.date() for t in timestamps} if timestamps else {datetime.utcnow().date()}
+
+            # ── ROAD CHECK (Member 3 Requirement) ──────────────────────────────────
+            # Step A: Distance to Road Centerline
+            on_road = True
+            try:
+                roads_col = get_collection(Collections.ROADS)
+                road_count = await roads_col.estimated_document_count()
+                
+                if road_count > 0:
+                    nearby_road = await roads_col.find_one({
+                        "geometry": {
+                            "$near": {
+                                "$geometry": {"type": "Point", "coordinates": list(centroid)},
+                                "$maxDistance": 10  # 10 meters — Discard Threshold
+                            }
+                        }
+                    })
+                    if not nearby_road:
+                        on_road = False
+                        print(f"[Clustering]   ⚠ Centroid {centroid} > 10m from road. Discarding as Noise.")
+                
+                # Step B: Satellite-Aided Verification (Sentinel-1/2) 
+                # If distance is borderline or we want higher assurance
+                if on_road:
+                    sat_verify = await satellite_service.validate_road_material(list(centroid))
+                    if sat_verify["status"] == "completed" and not sat_verify["likely_road"]:
+                        on_road = False
+                        print(f"[Clustering]   ⚠ Satellite (NDVI={sat_verify.get('ndvi')}) says NOT A ROAD. Discarding.")
+
+            except Exception as e:
+                # If 2dsphere index missing or other DB error, assume on road to be safe
+                pass
+
+            # Update noise status if road check failed
+            if not on_road:
+                is_noise = True
+
+            # Noise points: mark processed but don't create a cluster
+            if is_noise:
+                await detections_col.update_many(
+                    {"_id": {"$in": detection_ids}},
+                    {"$set": {"processed": True, "cluster_id": None}}
+                )
+                total_processed += len(cluster_dets)
+                continue
+
+            # 4c. Repeat detection check —
+            #     Is there already a cluster within eps meters at this location?
+            existing = None
+            try:
+                existing = await clusters_col.find_one({
+                    "geometry": {
+                        "$near": {
+                            "$geometry": {"type": "Point", "coordinates": list(centroid)},
+                            "$maxDistance": model.eps_meters
+                        }
+                    },
+                    "properties.damage_types": {"$exists": True}
+                })
+            except Exception:
+                pass  # 2dsphere index may not exist yet; treat as new
+
+            repeat_count  = 1
+            aging_index   = None
+            unique_days   = len(session_days)
+            
+            if existing:
+                repeat_count  = existing["properties"].get("repeat_count", 1) + 1
+                aging_index   = existing["properties"].get("aging_index")
+                
+                # Combine session days with existing cluster days
+                existing_first = existing.get("first_detected")
+                existing_last  = existing.get("last_detected")
+                all_days = set(session_days)
+                if isinstance(existing_first, datetime): all_days.add(existing_first.date())
+                if isinstance(existing_last, datetime): all_days.add(existing_last.date())
+                
+                # If unique_days == 1 → Status: DUPLICATE (handled by RiskModel internally)
+                # If unique_days > 1 → Status: REPEAT (RiskModel increases score by 20% per day)
+                unique_days = len(all_days)
+                
+                print(f"[Clustering]   ↳ Repeat #{repeat_count} over {unique_days} unique day(s)")
+
+            # 4d. Risk model
+            risk_result = RiskModel.calculate(
+                avg_severity=avg_severity, 
+                aging_index=aging_index, 
+                repeat_count=repeat_count,
+                unique_days=unique_days
+            )
+
+            temporal_status = "REPEAT" if unique_days > 1 else "DUPLICATE"
+
+            # 4e. Persist cluster
+            if existing:
+                # Merge into existing cluster (update in place)
+                merged_ids = list(set(
+                    [str(d) for d in existing["properties"].get("detection_ids", [])] +
+                    [str(d) for d in detection_ids]
+                ))
+                merged_count    = existing["properties"].get("points_count", 0) + len(cluster_dets)
+                merged_severity = round(
+                    (existing["properties"].get("avg_severity", avg_severity) + avg_severity) / 2, 4
+                )
+                merged_conf     = round(
+                    (existing["properties"].get("avg_confidence", avg_conf) + avg_conf) / 2, 4
+                )
+
+                await clusters_col.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {
+                        "properties.detection_ids":   merged_ids,
+                        "properties.points_count":    merged_count,
+                        "properties.avg_severity":    merged_severity,
+                        "properties.avg_confidence":  merged_conf,
+                        "properties.repeat_count":    repeat_count,
+                        "properties.final_risk_score": risk_result.final_risk_score,
+                        "properties.risk_level":       risk_result.risk_level,
+                        "properties.temporal_status":  temporal_status,
+                        "last_detected":               last_detected,
+                        "updated_at":                  datetime.utcnow(),
+                    }}
+                )
+                cluster_id = existing["_id"]
+                session_cluster_ids.add(cluster_id)
+
+            else:
+                # Create new cluster document
+                cluster_doc = {
+                    "type":     "Feature",
+                    "geometry": {"type": "Point", "coordinates": list(centroid)},
+                    "properties": {
+                        "detection_ids":    detection_ids,
+                        "points_count":     len(cluster_dets),
+                        "radius_meters":    round(max_radius, 2),
+                        "eps_used_meters":  model.eps_meters,
+                        "video_id":         video_id,          # Added for session tracking
+                        "damage_type":      damage_type,       # primary type of this cluster
+                        "damage_types":     damage_type_counts,
+                        "avg_severity":     round(avg_severity, 4),
+                        "avg_confidence":   round(avg_conf, 4),
+                        "aging_index":      aging_index,
+                        "final_risk_score": risk_result.final_risk_score,
+                        "risk_level":       risk_result.risk_level,
+                        "repeat_count":     repeat_count,
+                        "temporal_status":  temporal_status,
+                        "status":           "pending",
+                        "repair_history":   [],
+                    },
+                    "road_id":       None,
+                    "area_id":       None,
+                    "first_detected": first_detected,
+                    "last_detected":  last_detected,
+                    "created_at":     datetime.utcnow(),
+                    "updated_at":     datetime.utcnow(),
+                }
+                res        = await clusters_col.insert_one(cluster_doc)
+                cluster_id = res.inserted_id
+                session_cluster_ids.add(cluster_id)
+                group_clusters_created += 1
+
+            # Step 5: Write cluster_id back to detections + mark processed
+            await detections_col.update_many(
+                {"_id": {"$in": detection_ids}},
+                {"$set": {"cluster_id": cluster_id, "processed": True}}
+            )
+            total_processed += len(cluster_dets)
+
+        total_clusters_created += group_clusters_created
+        per_type_summary[damage_type] = {
+            "detections":        len(group_detections),
+            "clusters_created":  group_clusters_created,
+            "eps_meters":        model.eps_meters,
+        }
+
+    # ── Step 6: Update Video Upload Status ────────────────────────────────────
+    if video_id:
+        uploads_col = get_collection(Collections.VIDEO_UPLOADS)
+        await uploads_col.update_one(
+            {"video_id": video_id},
             {
                 "$set": {
-                    "cluster_id": cluster_id,
-                    "processed": True
+                    "status": "completed",
+                    "updated_at": datetime.utcnow()
                 }
             }
         )
-    
-    # Mark remaining noise points as processed (not clustered)
-    noise_indices = np.where(labels == -1)[0]
-    noise_ids = [detections[i]["_id"] for i in noise_indices]
-    if noise_ids:
-        await detections_col.update_many(
-            {"_id": {"$in": noise_ids}},
-            {"$set": {"processed": True}}
-        )
-    
+
+
+    # --- Step 4 Output Formatting: JSON list of unique Pothole IDs with Centroid and Risk ---
+    final_potholes = []
+    try:
+        # Fetch the clusters that were actually hit during this session
+        cluster_list = await clusters_col.find(
+            {"_id": {"$in": list(session_cluster_ids)}}
+        ).to_list(None)
+        
+        for c in cluster_list:
+            # We filter for Potholes specifically as requested by Step 4
+            dtype = c["properties"].get("damage_type", "unknown")
+            if dtype.lower() == "pothole":
+                final_potholes.append({
+                    "id": str(c["_id"]),
+                    "centroid": c["geometry"]["coordinates"],
+                    "damage_type": dtype,
+                    "final_risk_score": c["properties"]["final_risk_score"]
+                })
+    except Exception:
+        pass
+
     return {
-        "status": "completed",
-        "clusters_created": clusters_created,
-        "detections_processed": len(detections),
-        "message": f"Clustering completed. Created {clusters_created} new clusters from {len(detections)} detections."
+        "status":               "completed",
+        "clusters_created":     total_clusters_created,
+        "detections_processed": total_processed,
+        "per_type_breakdown":   per_type_summary,
+        "pothole_summary":      final_potholes, # The requested Step 4 Output
+        "message": (
+            f"Clustering complete. {total_clusters_created} new cluster(s) created "
+            f"from {total_processed} detection(s). Road and Temporal checks applied."
+        ),
     }

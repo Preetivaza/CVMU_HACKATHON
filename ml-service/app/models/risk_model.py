@@ -58,6 +58,8 @@ class RiskModel:
         avg_severity: float,
         aging_index: Optional[float],
         repeat_count: int,
+        unique_days: int = 1,
+        status: str = "pending",
     ) -> RiskResult:
         """
         Calculate final risk score and level.
@@ -67,8 +69,18 @@ class RiskModel:
         avg_severity  : Average severity score across detections in cluster (0–1)
         aging_index   : Satellite-derived road surface aging (0–1), or None if unavailable
         repeat_count  : Number of times this location has been detected
+        unique_days   : Number of distinct days this damage has been observed
         """
         aging = aging_index if aging_index is not None else cls.DEFAULT_AGING_INDEX
+
+        # ── REPAIR CHECK (Member 3 Requirement) ──────────────────────────────
+        # If marked as 'repaired', the problem is solved.
+        if status.lower() == "repaired":
+            return RiskResult(
+                final_risk_score=0.0,
+                risk_level="Repaired",
+                formula_used="repair-closure: score reset to 0.0"
+            )
 
         if repeat_count > cls.REPEAT_THRESHOLD:
             score  = cls.WEIGHT_SEVERITY_REPEAT * avg_severity + cls.WEIGHT_AGING_REPEAT * aging
@@ -76,6 +88,12 @@ class RiskModel:
         else:
             score  = cls.WEIGHT_SEVERITY_NORMAL * avg_severity + cls.WEIGHT_AGING_NORMAL * aging
             formula = f"normal: {cls.WEIGHT_SEVERITY_NORMAL}×severity + {cls.WEIGHT_AGING_NORMAL}×aging"
+
+        # ── TEMPORAL CHECK: 20% increase per unique day after the first ──
+        if unique_days > 1:
+            multiplier = 1.0 + (0.20 * (unique_days - 1))
+            score = score * multiplier
+            formula += f" | temporal-boost: {multiplier}x ({unique_days} days)"
 
         score = round(min(max(score, 0.0), 1.0), 4)
 
