@@ -38,3 +38,27 @@ __pycache__/
 !*.schema.json
 !*.metadata.json
 !test_results.json
+
+# Uploads (keep directory but ignore files)
+frontend/public/uploads/*
+!frontend/public/uploads/.gitkeep
+
+# Python
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+
+# Misc
+*.bak
+*.tmp
+
+# Machine Learning & Media
+*.pt
+*.mp4
+*.avi
+*.mkv
+
+# Sensitive Files
+*service-account*.json
+gee-service-account.json
