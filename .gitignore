@@ -1,5 +1,6 @@
 # Secrets & Keys
-gee-service-account.json
+google-credentials.json
+ml-service/gee-service-account.json
 *.pem
 *.key
 .env*
@@ -53,18 +54,122 @@ frontend/public/uploads/*
 *.bak
 *.tmp
 
-# Machine Learning & Media
-*.pt
+# ==============================
+# Dependencies
+# ==============================
+node_modules/
+frontend/node_modules/
+ml-service/venv/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# ==============================
+# Environment files
+# ==============================
+.env
+.env.local
+.env.*.local
+!.env.example
+frontend/.env.local
+ml-service/.env
+
+# ==============================
+# Secrets & Keys
+# ==============================
+gee-service-account.json
+gee-service-account.json
+*service-account*.json
+*.pem
+*.key
+security/
+
+# ==============================
+# Datasets & Large Files
+# ==============================
+data/
+*.csv
+*.xlsx
+*.xls
+*.sqlite
+*.mp4
+*.mov
+*.avi
 *.mkv
+
+# Machine Learning
+*.pt
 
 # AI Detection
 ai-detection/test_data/
 ai-detection/*_damage_report.json
 ai-detection/.DOCUMENTATION.md
 
-# Sensitive Files
-*service-account*.json
-gee-service-account.json
+# ==============================
+# Build outputs
+# ==============================
+.next/
+frontend/.next/
+dist/
+build/
+out/
 
-# Virtual environment
-CMVU_Hackathon/
+# ==============================
+# OS Files
+# ==============================
+.DS_Store
+Thumbs.db
+
+# ==============================
+# IDE
+# ==============================
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ==============================
+# Logs
+# ==============================
+*.log
+npm-debug.log*
+
+# ==============================
+# Uploads (keep directory but ignore files)
+# ==============================
+frontend/public/uploads/*
+!frontend/public/uploads/.gitkeep
+
+# ==============================
+# Python packaging
+# ==============================
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+
+# ==============================
+# Local Config Overrides
+# ==============================
+*.local.js
+*.local.json
+
+# ==============================
+# Misc
+# ==============================
+*.bak
+*.tmp
+
+# ==============================
+# Exceptions (keep these)
+# ==============================
+!package.json
+!tsconfig.json
+!jsconfig.json
+!manifest.json
+!*.schema.json
+!*.metadata.json
+!test_results.json
+

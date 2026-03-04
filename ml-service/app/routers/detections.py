@@ -7,81 +7,32 @@ Endpoint: POST /api/v1/detections/bulk
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime
-from bson import ObjectId
 
-from app.schemas import DetectionsBulkRequest
+from app.schemas.detection import DetectionsBulkRequest
 from app.core.database import get_collection, Collections
 from app.dependencies.auth import verify_api_key
+from app.services.detections_service import process_bulk_detections
 
-router = APIRouter(dependencies=[Depends(verify_api_key)])
-
+router = APIRouter(prefix="/api/v1/detections", tags=["Detections"], dependencies=[Depends(verify_api_key)])
 
 @router.post("/bulk")
-async def bulk_create_detections(request: DetectionsBulkRequest):
+async def receive_bulk_detections(payload: DetectionsBulkRequest):
     """
     Ingest raw detections from the AI engine (Member 1).
-
-    Accepts GeoJSON Feature detections with damage_type, confidence,
-    severity_score, and geographic coordinates. Each detection is stored
-    in the `raw_detections` collection with `processed=False` for
-    downstream DBSCAN clustering.
-
-    - **video_id**: Session/video identifier from the AI engine
-    - **model_version**: YOLO model version used for inference
-    - **detections**: List of GeoJSON Feature detections
     """
-    detections_col = get_collection(Collections.RAW_DETECTIONS)
-    uploads_col = get_collection(Collections.VIDEO_UPLOADS)
-
-    if not request.detections:
-        raise HTTPException(status_code=400, detail="No detections provided")
-
-    # Build MongoDB documents from the request
-    docs = []
-    for det in request.detections:
-        doc = {
-            "type": "Feature",
-            "geometry": det.geometry.model_dump(),
-            "properties": {
-                **det.properties.model_dump(),
-                "video_id": request.video_id,
-                "model_version": request.model_version,
-            },
-            "cluster_id": None,
-            "processed": False,
-            "created_at": datetime.utcnow(),
-        }
-        docs.append(doc)
-
-    # Bulk insert
-    result = await detections_col.insert_many(docs)
-
-    # Upsert video_uploads tracking record
-    await uploads_col.update_one(
-        {"video_id": request.video_id},
-        {
-            "$set": {
-                "video_id": request.video_id,
-                "status": "processing",
-                "updated_at": datetime.utcnow(),
-            },
-            "$setOnInsert": {
-                "created_at": datetime.utcnow(),
-                "original_filename": request.video_id,
-                "storage_path": "",
-                "file_size": 0,
-            },
-        },
-        upsert=True,
-    )
-
-    return {
-        "status": "success",
-        "video_id": request.video_id,
-        "detections_ingested": len(result.inserted_ids),
-        "message": f"Successfully ingested {len(result.inserted_ids)} detections for video '{request.video_id}'.",
-    }
-
+    try:
+        result = await process_bulk_detections(payload)
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error processing detections: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error while saving to database.")
 
 @router.get("")
 async def list_detections(
@@ -117,4 +68,3 @@ async def list_detections(
         "count": len(detections),
         "detections": detections,
     }
-
