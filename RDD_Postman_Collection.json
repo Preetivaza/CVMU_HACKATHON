@@ -1,0 +1,850 @@
+{
+  "info": {
+    "name": "RDD — Road Damage Detection API",
+    "description": "Complete API collection for Road Damage Detection system.\n\nFlow:\n1. Auth (Register → Login → copy token)\n2. Upload video (optional)\n3. Ingest Detections from AI engine\n4. Trigger ML Clustering\n5. Satellite Aging Analysis\n6. Risk / Repair Status Update\n7. Dashboard queries (map, analytics)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "NEXTJS",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "ML",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "TOKEN",
+      "value": "",
+      "type": "string",
+      "description": "Paste token from Login response"
+    },
+    {
+      "key": "VIDEO_ID",
+      "value": "test5.mp4",
+      "type": "string"
+    },
+    {
+      "key": "CLUSTER_ID",
+      "value": "",
+      "type": "string",
+      "description": "Paste _id from GET /clusters response"
+    },
+    {
+      "key": "API_KEY",
+      "value": "member1-secret-key",
+      "type": "string",
+      "description": "API Key for secure M2M calls"
+    }
+  ],
+  "item": [
+    {
+      "name": "0 — Health",
+      "item": [
+        {
+          "name": "ML Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{ML}}/ml/health"
+          }
+        },
+        {
+          "name": "ML Root",
+          "request": {
+            "method": "GET",
+            "url": "{{ML}}/"
+          }
+        },
+        {
+          "name": "ML Docs (Swagger)",
+          "request": {
+            "method": "GET",
+            "url": "{{ML}}/docs"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1 — Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "url": "{{NEXTJS}}/api/auth/register",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@rdd.test\",\n  \"password\": \"Admin1234!\",\n  \"name\": \"Road Admin\",\n  \"role\": \"admin\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.token) { pm.collectionVariables.set('TOKEN', res.token); }",
+                  "console.log('Token saved:', res.token ? 'YES' : 'NO');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{NEXTJS}}/api/auth/login",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@rdd.test\",\n  \"password\": \"Admin1234!\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "url": "{{NEXTJS}}/api/auth/me",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Update My Profile",
+          "request": {
+            "method": "PATCH",
+            "url": "{{NEXTJS}}/api/auth/me",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Admin\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2 — Video Upload",
+      "item": [
+        {
+          "name": "Upload Video",
+          "request": {
+            "method": "POST",
+            "url": "{{NEXTJS}}/api/upload/video",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "video",
+                  "type": "file",
+                  "src": "/path/to/test5.mp4",
+                  "description": "Select your dashcam video file"
+                },
+                {
+                  "key": "gps",
+                  "type": "file",
+                  "src": "/path/to/gps.csv",
+                  "description": "(Optional) GPS CSV with timestamp,latitude,longitude,speed columns"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "List Uploads",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{NEXTJS}}/api/upload/video?page=1&limit=10",
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": "uploaded",
+                  "disabled": true
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Get Upload Status",
+          "request": {
+            "method": "GET",
+            "url": "{{NEXTJS}}/api/upload/status/{{VIDEO_ID}}",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 — Detections (Member 1 AI Engine)",
+      "item": [
+        {
+          "name": "Ingest Detections — Flat Format (Member 1)",
+          "request": {
+            "method": "POST",
+            "url": "{{NEXTJS}}/api/v1/detections/bulk",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{API_KEY}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"video_id\": \"test5.mp4\",\n  \"model_version\": \"yolov8_v1\",\n  \"detections\": [\n    {\n      \"video_id\": \"test5.mp4\",\n      \"frame_id\": 42,\n      \"timestamp\": \"0:00:01.680\",\n      \"conditions\": { \"D40\": 1 },\n      \"severity\": \"Critical\",\n      \"damage_score\": 8.41,\n      \"confidence_level\": 0.84\n    },\n    {\n      \"video_id\": \"test5.mp4\",\n      \"frame_id\": 67,\n      \"timestamp\": \"0:00:02.680\",\n      \"conditions\": { \"D40\": 1 },\n      \"severity\": \"Critical\",\n      \"damage_score\": 8.18,\n      \"confidence_level\": 0.82\n    },\n    {\n      \"video_id\": \"test5.mp4\",\n      \"frame_id\": 95,\n      \"timestamp\": \"0:00:03.800\",\n      \"conditions\": { \"D00\": 1 },\n      \"severity\": \"High\",\n      \"damage_score\": 6.32,\n      \"confidence_level\": 0.73\n    },\n    {\n      \"video_id\": \"test5.mp4\",\n      \"frame_id\": 120,\n      \"timestamp\": \"0:00:04.800\",\n      \"conditions\": { \"D40\": 1 },\n      \"severity\": \"High\",\n      \"damage_score\": 5.92,\n      \"confidence_level\": 0.69\n    },\n    {\n      \"video_id\": \"test5.mp4\",\n      \"frame_id\": 145,\n      \"timestamp\": \"0:00:05.800\",\n      \"conditions\": { \"D20\": 1 },\n      \"severity\": \"Medium\",\n      \"damage_score\": 3.45,\n      \"confidence_level\": 0.58\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Ingest Detections — ML Service Direct",
+          "request": {
+            "method": "POST",
+            "url": "{{ML}}/api/v1/detections/bulk",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{API_KEY}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"video_id\": \"test5.mp4\",\n  \"model_version\": \"yolov8_v1\",\n  \"detections\": [\n    {\n      \"type\": \"Feature\",\n      \"geometry\": { \"type\": \"Point\", \"coordinates\": [77.2090, 28.6139] },\n      \"properties\": {\n        \"video_id\": \"test5.mp4\",\n        \"damage_type\": \"pothole\",\n        \"confidence\": 0.84,\n        \"bbox_area_ratio\": 0.15,\n        \"normalized_acceleration\": 0.0,\n        \"severity_score\": 0.84\n      }\n    },\n    {\n      \"type\": \"Feature\",\n      \"geometry\": { \"type\": \"Point\", \"coordinates\": [77.2091, 28.6140] },\n      \"properties\": {\n        \"video_id\": \"test5.mp4\",\n        \"damage_type\": \"pothole\",\n        \"confidence\": 0.82,\n        \"bbox_area_ratio\": 0.12,\n        \"normalized_acceleration\": 0.0,\n        \"severity_score\": 0.82\n      }\n    },\n    {\n      \"type\": \"Feature\",\n      \"geometry\": { \"type\": \"Point\", \"coordinates\": [77.2092, 28.6138] },\n      \"properties\": {\n        \"video_id\": \"test5.mp4\",\n        \"damage_type\": \"crack\",\n        \"confidence\": 0.73,\n        \"bbox_area_ratio\": 0.08,\n        \"normalized_acceleration\": 0.0,\n        \"severity_score\": 0.73\n      }\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "List Detections",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{NEXTJS}}/api/v1/detections?video_id=test5.mp4&limit=20",
+              "query": [
+                {
+                  "key": "video_id",
+                  "value": "test5.mp4"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "damage_type",
+                  "value": "pothole",
+                  "disabled": true
+                },
+                {
+                  "key": "processed",
+                  "value": "false",
+                  "disabled": true
+                },
+                {
+                  "key": "min_confidence",
+                  "value": "0.7",
+                  "disabled": true
+                },
+                {
+                  "key": "start_date",
+                  "value": "2025-01-01",
+                  "disabled": true
+                },
+                {
+                  "key": "end_date",
+                  "value": "2025-12-31",
+                  "disabled": true
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4 — ML Clustering (ML Service)",
+      "item": [
+        {
+          "name": "Trigger DBSCAN Clustering",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "console.log('Clustering result:', JSON.stringify(pm.response.json(), null, 2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{ML}}/ml/clustering/run",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{API_KEY}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"video_id\": \"test5.mp4\",\n  \"force_recluster\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "Trigger Clustering via Next.js (proxy)",
+          "request": {
+            "method": "POST",
+            "url": "{{NEXTJS}}/api/v1/clusters",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"video_id\": \"test5.mp4\",\n  \"force_recluster\": false\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5 — Clusters",
+      "item": [
+        {
+          "name": "List All Clusters",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "const features = res.features || [];",
+                  "if (features.length > 0) {",
+                  "  const id = features[0]._id;",
+                  "  pm.collectionVariables.set('CLUSTER_ID', id);",
+                  "  console.log('CLUSTER_ID saved:', id);",
+                  "} else {",
+                  "  console.log('No clusters found — run clustering first');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{NEXTJS}}/api/v1/clusters?limit=20",
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "risk_level",
+                  "value": "Critical",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "pending",
+                  "disabled": true
+                },
+                {
+                  "key": "min_risk_score",
+                  "value": "0.7",
+                  "disabled": true
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Get Cluster by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{NEXTJS}}/api/v1/clusters/{{CLUSTER_ID}}",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Update Cluster Status (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "url": "{{NEXTJS}}/api/v1/clusters/{{CLUSTER_ID}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"in_progress\",\n  \"notes\": \"Repair crew dispatched\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Cluster",
+          "request": {
+            "method": "DELETE",
+            "url": "{{NEXTJS}}/api/v1/clusters/{{CLUSTER_ID}}",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6 — Satellite & Risk (ML Service)",
+      "item": [
+        {
+          "name": "Satellite Status Check",
+          "request": {
+            "method": "GET",
+            "url": "{{ML}}/ml/satellite/status",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{API_KEY}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Run Satellite Analysis",
+          "request": {
+            "method": "POST",
+            "url": "{{ML}}/ml/satellite/analyze",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{API_KEY}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cluster_id\": \"{{CLUSTER_ID}}\",\n  \"coordinates\": [77.2090, 28.6139],\n  \"radius_meters\": 50\n}"
+            }
+          }
+        },
+        {
+          "name": "Manually Set Aging Index",
+          "request": {
+            "method": "POST",
+            "url": "{{ML}}/ml/risk/update-aging",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{API_KEY}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cluster_id\": \"{{CLUSTER_ID}}\",\n  \"aging_index\": 0.45\n}"
+            }
+          }
+        },
+        {
+          "name": "Recalculate ALL Risk Scores",
+          "request": {
+            "method": "POST",
+            "url": "{{ML}}/ml/risk/calculate",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{API_KEY}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recalculate_all\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Recalculate Risk for Specific Cluster",
+          "request": {
+            "method": "POST",
+            "url": "{{ML}}/ml/risk/calculate",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{API_KEY}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cluster_ids\": [\"{{CLUSTER_ID}}\"],\n  \"recalculate_all\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Repair Status → in_progress",
+          "request": {
+            "method": "POST",
+            "url": "{{ML}}/ml/risk/update-status",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{API_KEY}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cluster_id\": \"{{CLUSTER_ID}}\",\n  \"status\": \"in_progress\",\n  \"notes\": \"Repair crew dispatched on 2025-03-04\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Repair Status → repaired",
+          "request": {
+            "method": "POST",
+            "url": "{{ML}}/ml/risk/update-status",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{API_KEY}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cluster_id\": \"{{CLUSTER_ID}}\",\n  \"status\": \"repaired\",\n  \"notes\": \"Road fully repaired, risk reset to 0\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7 — Dashboard & Analytics",
+      "item": [
+        {
+          "name": "Map Data — Heatmap (zoom ≤ 12)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{NEXTJS}}/api/v1/map-data?zoom=10&min_lon=77.0&max_lon=78.0&min_lat=28.0&max_lat=29.0",
+              "query": [
+                {
+                  "key": "zoom",
+                  "value": "10"
+                },
+                {
+                  "key": "min_lon",
+                  "value": "77.0"
+                },
+                {
+                  "key": "max_lon",
+                  "value": "78.0"
+                },
+                {
+                  "key": "min_lat",
+                  "value": "28.0"
+                },
+                {
+                  "key": "max_lat",
+                  "value": "29.0"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Map Data — Clusters (zoom 12-15)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{NEXTJS}}/api/v1/map-data?zoom=13&min_lon=77.0&max_lon=78.0&min_lat=28.0&max_lat=29.0",
+              "query": [
+                {
+                  "key": "zoom",
+                  "value": "13"
+                },
+                {
+                  "key": "min_lon",
+                  "value": "77.0"
+                },
+                {
+                  "key": "max_lon",
+                  "value": "78.0"
+                },
+                {
+                  "key": "min_lat",
+                  "value": "28.0"
+                },
+                {
+                  "key": "max_lat",
+                  "value": "29.0"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Map Data — Points (zoom ≥ 15)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{NEXTJS}}/api/v1/map-data?zoom=16&min_lon=77.18&max_lon=77.22&min_lat=28.60&max_lat=28.62",
+              "query": [
+                {
+                  "key": "zoom",
+                  "value": "16"
+                },
+                {
+                  "key": "min_lon",
+                  "value": "77.18"
+                },
+                {
+                  "key": "max_lon",
+                  "value": "77.22"
+                },
+                {
+                  "key": "min_lat",
+                  "value": "28.60"
+                },
+                {
+                  "key": "max_lat",
+                  "value": "28.62"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Monthly Trend",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{NEXTJS}}/api/v1/analytics/monthly-trend?months=6",
+              "query": [
+                {
+                  "key": "months",
+                  "value": "6"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Priority Ranking",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{NEXTJS}}/api/v1/analytics/priority-ranking?limit=10&status=pending",
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": "pending"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "List Areas (Heatmap cells)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{NEXTJS}}/api/v1/areas?limit=20",
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "List Roads",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{NEXTJS}}/api/v1/roads?limit=20",
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "road_type",
+                  "value": "highway",
+                  "disabled": true
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

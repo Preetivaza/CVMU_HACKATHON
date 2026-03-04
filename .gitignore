@@ -53,11 +53,18 @@ frontend/public/uploads/*
 *.bak
 *.tmp
 
-# Road Detection
-road_detection/yolov8s.pt
-road_detection/test_data/
-road_detection/*_damage_report.json
-road_detection/.DOCUMENTATION.md
+# Machine Learning & Media
+*.pt
+*.mkv
+
+# AI Detection
+ai-detection/test_data/
+ai-detection/*_damage_report.json
+ai-detection/.DOCUMENTATION.md
+
+# Sensitive Files
+*service-account*.json
+gee-service-account.json
 
 # Virtual environment
 CMVU_Hackathon/
