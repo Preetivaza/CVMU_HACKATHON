@@ -55,10 +55,16 @@ frontend/public/uploads/*
 
 # Machine Learning & Media
 *.pt
-*.mp4
-*.avi
 *.mkv
+
+# AI Detection
+ai-detection/test_data/
+ai-detection/*_damage_report.json
+ai-detection/.DOCUMENTATION.md
 
 # Sensitive Files
 *service-account*.json
 gee-service-account.json
+
+# Virtual environment
+CMVU_Hackathon/
