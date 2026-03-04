@@ -12,6 +12,7 @@ from ultralytics import YOLO
 MODEL_PATH = "best.pt"
 VIDEO_PATH = "test5.mp4" # Replace with your dashcam video file path
 NEXTJS_API_URL = "http://localhost:3000/api/v1/detections/bulk"
+API_KEY = "member1-secret-key"
 EXPORT_TO_API = False # Set to True to send to the backend directly
 
 video_filename = os.path.basename(VIDEO_PATH)
@@ -180,8 +181,9 @@ def main():
     if EXPORT_TO_API:
         try:
             print(f"Uploading to {NEXTJS_API_URL}...")
-            response = requests.post(NEXTJS_API_URL, json=final_payload)
-            if response.status_code == 200:
+            headers = {"Content-Type": "application/json", "x-api-key": API_KEY}
+            response = requests.post(NEXTJS_API_URL, json=final_payload, headers=headers)
+            if response.status_code in [200, 201]:
                 print("Uploaded successfully!")
             else:
                 print(f"Failed to upload. Status code: {response.status_code}, Response: {response.text}")
