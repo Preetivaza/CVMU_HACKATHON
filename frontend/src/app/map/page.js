@@ -59,15 +59,15 @@ export default function MapPage() {
       {/* Dynamic Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Layers className="text-blue-500" size={24} />
+          <h1 className="text-3xl font-extrabold text-gray-900 flex items-center gap-3 tracking-tight">
+            <Layers className="text-blue-600" size={24} />
             Live Infrastructure Map
           </h1>
-          <p className="text-slate-500 text-sm">Visualizing <strong>{clusters.length}</strong> active clusters across <strong>2.4km</strong> monitored road segments.</p>
+          <p className="text-slate-500 text-sm font-medium italic">Visualizing <strong>{clusters.length}</strong> active clusters across <strong>2.4km</strong> monitored road segments.</p>
         </div>
         <div className="flex gap-2">
-           <div className="px-4 py-2 bg-white/5 rounded-lg border border-white/5 text-xs text-slate-400 flex items-center gap-2">
-             <div className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+           <div className="px-4 py-2 bg-emerald-50 rounded-lg border border-emerald-100 text-[10px] font-extrabold text-emerald-600 flex items-center gap-2 uppercase tracking-widest">
+             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
              Live Data Feed
            </div>
         </div>
@@ -75,13 +75,13 @@ export default function MapPage() {
 
       <div className="flex-1 flex gap-6 min-h-0">
         {/* Main Map Box */}
-        <div className="flex-[3] relative">
+        <div className="flex-[3] relative card shadow-lg overflow-hidden border-2 border-white">
           <MapComponent clusters={clusters} onClusterClick={(c) => setSelectedCluster(c)} />
           
           {/* Quick Floating Actions */}
           <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2">
-            <button className="p-2 glass text-white hover:bg-blue-600 transition-colors shadow-lg shadow-black/40"><Search size={20} /></button>
-            <button className="p-2 glass text-white hover:bg-blue-600 transition-colors shadow-lg shadow-black/40"><Navigation size={20} /></button>
+            <button className="p-2.5 bg-white rounded-xl text-gray-600 hover:text-blue-600 shadow-xl border border-gray-100 transition-all active:scale-95"><Search size={20} /></button>
+            <button className="p-2.5 bg-white rounded-xl text-gray-600 hover:text-blue-600 shadow-xl border border-gray-100 transition-all active:scale-95"><Navigation size={20} /></button>
           </div>
         </div>
 
@@ -93,64 +93,66 @@ export default function MapPage() {
               initial={{ x: 50, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: 50, opacity: 0 }}
-              className="flex-1 glass p-6 overflow-y-auto min-w-[350px]"
+              className="flex-1 card p-6 overflow-y-auto min-w-[380px] bg-white border-l-4 border-blue-500 shadow-2xl"
             >
               <button 
                 onClick={() => setSelectedCluster(null)}
-                className="text-xs text-slate-500 flex items-center gap-1 mb-6 hover:text-white transition-colors"
+                className="text-xs font-bold text-gray-400 flex items-center gap-1 mb-6 hover:text-blue-600 transition-colors uppercase tracking-widest"
               >
-                <ArrowLeft size={12} /> Deselect
+                <ArrowLeft size={14} /> Back to Overview
               </button>
 
               <div className="space-y-8">
                 <header>
-                  <div className={`w-fit px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest mb-3 ${getRiskBadge(selectedCluster.properties.risk_level)}`}>
-                    {selectedCluster.properties.risk_level} Risk
+                  <div className={`w-fit px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-[0.2em] mb-3 border ${getRiskBadge(selectedCluster.properties.risk_level)}`}>
+                    {selectedCluster.properties.risk_level} Priority
                   </div>
-                  <h2 className="text-2xl font-bold uppercase">{selectedCluster.properties.damage_type || 'Multiple Detections'}</h2>
-                  <div className="text-slate-500 flex items-center gap-1.5 text-sm font-medium mt-1">
+                  <h2 className="text-2xl font-extrabold text-gray-900 leading-tight tracking-tight uppercase">
+                    {selectedCluster.properties.damage_type || 'Multiple Anomalies'}
+                  </h2>
+                  <div className="text-gray-400 flex items-center gap-1.5 text-xs font-bold mt-2 uppercase tracking-tight">
                     <MapPin size={14} className="text-red-500" />
-                    {selectedCluster.geometry.coordinates[1].toFixed(5)}, {selectedCluster.geometry.coordinates[0].toFixed(5)}
+                    {selectedCluster.geometry.coordinates[1].toFixed(6)}, {selectedCluster.geometry.coordinates[0].toFixed(6)}
                   </div>
                 </header>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <DetailBox label="Risk Score" value={selectedCluster.properties.final_risk_score} />
+                  <DetailBox label="Risk Index" value={selectedCluster.properties.final_risk_score} />
                   <DetailBox label="Confidence" value={`${(selectedCluster.properties.avg_confidence * 100).toFixed(0)}%`} />
-                  <DetailBox label="Points" value={selectedCluster.properties.points_count} />
-                  <DetailBox label="Repeats" value={selectedCluster.properties.repeat_count || 1} />
+                  <DetailBox label="Feature Points" value={selectedCluster.properties.points_count} />
+                  <DetailBox label="Audit Count" value={selectedCluster.properties.repeat_count || 1} />
                 </div>
 
-                <div className="space-y-4 pt-6 border-t border-white/5">
-                  <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Primary Action Center</h4>
+                <div className="space-y-4 pt-6 border-t border-gray-50">
+                  <h4 className="text-[10px] font-black uppercase tracking-[0.25em] text-gray-400 mb-4">Command Actions</h4>
                   <div className="grid grid-cols-1 gap-3">
                     <StatusBtn 
                       active={selectedCluster.properties.status === 'pending'} 
                       icon={<AlertTriangle size={18} />} 
-                      label="Mark Pending" 
+                      label="Mark Pending Review" 
                       onClick={() => handleUpdateStatus('pending')}
                     />
                     <StatusBtn 
                       active={selectedCluster.properties.status === 'in_progress'} 
-                      icon={<Clock size={14} />} 
-                      label="Deploy Repair Team" 
+                      icon={<Clock size={16} />} 
+                      label="Deploy Maintenance" 
                       onClick={() => handleUpdateStatus('in_progress')}
                     />
                     <StatusBtn 
                       active={selectedCluster.properties.status === 'repaired'} 
-                      icon={<CheckCircle2 size={14} />} 
-                      label="Mark as Repaired" 
+                      icon={<CheckCircle2 size={16} />} 
+                      label="Repair Verified" 
                       onClick={() => handleUpdateStatus('repaired')}
                     />
                   </div>
                 </div>
 
-                <div className="p-4 bg-white/5 rounded-2xl border border-white/5 text-xs text-slate-500">
-                  <div className="flex items-center gap-2 mb-2 font-bold text-slate-400">
+                <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 text-[11px] text-gray-500 font-medium">
+                  <div className="flex items-center gap-2 mb-2 font-black text-gray-400 uppercase tracking-widest">
                     <Calendar size={12} />
-                    Audit Logs
+                    Detection Timeline
                   </div>
-                  <p>First detected: {new Date(selectedCluster.first_detected).toLocaleString()}</p>
+                  <p>Initial: {new Date(selectedCluster.first_detected).toLocaleString()}</p>
                 </div>
               </div>
             </motion.aside>
@@ -159,13 +161,15 @@ export default function MapPage() {
                 key="empty-state"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="flex-1 glass p-10 flex flex-col items-center justify-center text-center text-slate-500"
+                className="flex-1 card p-10 flex flex-col items-center justify-center text-center bg-white shadow-xl"
              >
-                <div className="w-16 h-16 bg-white/5 rounded-3xl flex items-center justify-center mb-4">
+                <div className="w-16 h-16 bg-blue-50 rounded-3xl flex items-center justify-center mb-6 text-blue-600 shadow-inner">
                   <Layers size={32} />
                 </div>
-                <h3 className="text-lg font-bold text-slate-300">No Cluster Selected</h3>
-                <p className="text-sm mt-2">Select a point on the map to trigger forensic depth analysis or status updates.</p>
+                <h3 className="text-xl font-extrabold text-gray-900 tracking-tight">No Cluster Selected</h3>
+                <p className="text-sm text-gray-500 font-medium mt-2 leading-relaxed">
+                  Select a point on the live map to trigger forensic depth analysis, view damage history, or authorize repairs.
+                </p>
              </motion.aside>
           )}
         </AnimatePresence>
@@ -176,9 +180,9 @@ export default function MapPage() {
 
 function DetailBox({ label, value }) {
   return (
-    <div className="p-4 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
-      <span className="text-[10px] uppercase font-black text-slate-500 tracking-widest block mb-1">{label}</span>
-      <span className="text-lg font-bold text-slate-100">{value}</span>
+    <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 shadow-sm transition-transform hover:scale-[1.02]">
+      <span className="text-[9px] uppercase font-black text-gray-400 tracking-[0.2em] block mb-1">{label}</span>
+      <span className="text-xl font-extrabold text-gray-900 tracking-tight">{value}</span>
     </div>
   );
 }
@@ -188,8 +192,8 @@ function StatusBtn({ icon, label, active, onClick }) {
     <button 
       onClick={onClick}
       className={`
-        w-full flex items-center gap-3 px-5 py-4 rounded-2xl transition-all duration-300 font-bold text-sm
-        ${active ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)]' : 'bg-white/5 text-slate-300 hover:bg-white/10 border border-white/5'}
+        w-full flex items-center gap-4 px-5 py-4 rounded-xl transition-all duration-300 font-extrabold text-xs uppercase tracking-wider
+        ${active ? 'bg-[#2563eb] text-white shadow-xl shadow-blue-500/30 ring-4 ring-blue-50' : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-gray-100'}
       `}
     >
       <div className={active ? 'scale-110' : ''}>{icon}</div>
@@ -200,7 +204,8 @@ function StatusBtn({ icon, label, active, onClick }) {
 }
 
 function getRiskBadge(level) {
-  if (level === 'Critical') return 'bg-red-500/20 text-red-500 border border-red-500/30';
-  if (level === 'High') return 'bg-orange-500/20 text-orange-500 border border-orange-500/30';
-  return 'bg-blue-500/20 text-blue-500 border border-blue-500/30';
+  if (level === 'Critical') return 'bg-red-50 text-red-600 border-red-100';
+  if (level === 'High') return 'bg-orange-50 text-orange-600 border-orange-100';
+  return 'bg-blue-50 text-blue-600 border-blue-100';
 }
+
