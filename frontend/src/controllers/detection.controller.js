@@ -10,9 +10,23 @@ import { HTTP_STATUS, PAGINATION } from '@/utils/constants';
 import { DetectionModel } from '@/models/detection.model';
 import { UploadModel } from '@/models/upload.model';
 
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || 'sadaksurksha_internal_ml_service_2026';
+
 export class DetectionController {
-  /** POST /api/v1/detections/bulk — receive bulk detections from Member 1 */
+  /** POST /api/v1/detections/bulk — receive bulk detections from AI engine */
   static async bulkCreate(request) {
+    // ── Auth: Accept either user JWT (via middleware) or internal service key ─
+    const internalKey = request.headers.get('x-internal-key');
+    const isInternalCall = INTERNAL_API_KEY && internalKey === INTERNAL_API_KEY;
+    if (!isInternalCall) {
+      // Check for user auth if not an internal service call
+      const authHeader = request.headers.get('authorization');
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return NextResponse.json({ error: 'Unauthorized. A valid Bearer token or X-Internal-Key is required.' }, { status: HTTP_STATUS.UNAUTHORIZED });
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const body = await request.json();
     let originalDetections = [];
     let videoId = null;
@@ -20,11 +34,11 @@ export class DetectionController {
     if (Array.isArray(body)) {
       originalDetections = body;
       if (originalDetections.length > 0) {
-        videoId = originalDetections[0].video_id;
+        videoId = originalDetections[0].video_id || originalDetections[0]?.properties?.video_id;
       }
     } else if (body.detections && Array.isArray(body.detections)) {
       originalDetections = body.detections;
-      videoId = body.video_id || (originalDetections.length > 0 ? originalDetections[0].video_id : null);
+      videoId = body.video_id || (originalDetections.length > 0 ? (originalDetections[0]?.properties?.video_id || originalDetections[0]?.video_id) : null);
     } else {
       return NextResponse.json({ error: 'Invalid payload format. Expected an array of detections or { detections: [...] }' }, { status: HTTP_STATUS.BAD_REQUEST });
     }

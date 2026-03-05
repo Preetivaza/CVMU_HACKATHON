@@ -1,4 +1,4 @@
-# Road Damage Detection & Risk Mapping System - Backend Design
+# SadakSurksha - Road Damage Detection & Risk Mapping System - Backend Design
 
 ## System Architecture Overview
 
@@ -612,7 +612,9 @@ Member 1 must send detections via `POST /api/v1/detections/bulk` with:
   - `possible_duplicate`
 
 ### Severity Score Calculation (Member 1 should implement)
-```
 severity_score = confidence × bbox_area_ratio × (0.5 + normalized_acceleration × 0.5)
 ```
+
+---
+*Developed for SadakSurksha*
 

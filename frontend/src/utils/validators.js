@@ -68,13 +68,20 @@ export const validateDetection = (detection) => {
     return { isValid: false, errors: ['Detection must be an object'] };
   }
 
-  if (!detection.video_id) errors.push('Missing required field: video_id');
-  if (detection.frame_id === undefined) errors.push('Missing required field: frame_id');
-  if (!detection.conditions || typeof detection.conditions !== 'object') {
-    errors.push('Missing or invalid field: conditions');
-  }
-  if (detection.damage_score === undefined || typeof detection.damage_score !== 'number') {
-    errors.push('Missing or invalid field: damage_score');
+  // Support GeoJSON Feature format from AI script
+  const props = detection.properties || detection;
+  const video_id = props.video_id || detection.video_id;
+
+  if (!video_id) errors.push('Missing required field: video_id');
+
+  // Accept both flat and GeoJSON geometries
+  const geometry = detection.geometry || null;
+  if (!geometry && !detection.location) {
+    // Flat format: check for lat/lon fields
+    if (props.latitude === undefined && props.lat === undefined &&
+      props.longitude === undefined && props.lon === undefined) {
+      errors.push('Missing geometry or location coordinates');
+    }
   }
 
   return {
@@ -82,6 +89,7 @@ export const validateDetection = (detection) => {
     errors
   };
 };
+
 
 /**
  * Calculate risk level from score

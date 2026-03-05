@@ -35,9 +35,9 @@ function parseCSV(content) {
     const row = {};
 
     if (mapping.timestamp !== -1 && values[mapping.timestamp]) {
-        row.timestamp = new Date(values[mapping.timestamp]);
+      row.timestamp = new Date(values[mapping.timestamp]);
     } else {
-        row.timestamp = new Date(); // Fallback
+      row.timestamp = new Date(); // Fallback
     }
 
     if (mapping.latitude !== -1) row.latitude = parseFloat(values[mapping.latitude]);
@@ -55,82 +55,117 @@ export class UploadController {
   /** POST /api/upload/video — receives video + GPS + accelerometer files */
   static async uploadVideo(request) {
     try {
-        const formData = await request.formData();
-        const videoFile = formData.get('video');
-        const gpsFile = formData.get('gps');
-        const accelerometerFile = formData.get('accelerometer');
+      const formData = await request.formData();
+      const videoFile = formData.get('video');
+      const gpsFile = formData.get('gps');
+      const accelerometerFile = formData.get('accelerometer');
 
-        if (!videoFile || !(videoFile instanceof File)) {
-            return NextResponse.json({ error: 'Video file is required' }, { status: HTTP_STATUS.BAD_REQUEST });
-        }
+      if (!videoFile || !(videoFile instanceof File)) {
+        return NextResponse.json({ error: 'Video file is required' }, { status: HTTP_STATUS.BAD_REQUEST });
+      }
 
-        const videoId = `upload_${uuidv4().slice(0, 12)}`;
-        const fileExtension = path.extname(videoFile.name) || '.mp4';
-        const fileName = `${videoId}${fileExtension}`;
+      const videoId = `upload_${uuidv4().slice(0, 12)}`;
+      const fileExtension = path.extname(videoFile.name) || '.mp4';
+      const fileName = `${videoId}${fileExtension}`;
 
-        // Ensure directory exists
-        const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-        if (!existsSync(uploadsDir)) await mkdir(uploadsDir, { recursive: true });
+      // Ensure directory exists
+      const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!existsSync(uploadsDir)) await mkdir(uploadsDir, { recursive: true });
 
-        // Save File
-        const videoBuffer = Buffer.from(await videoFile.arrayBuffer());
-        await writeFile(path.join(uploadsDir, fileName), videoBuffer);
+      // Save File
+      const videoBuffer = Buffer.from(await videoFile.arrayBuffer());
+      await writeFile(path.join(uploadsDir, fileName), videoBuffer);
 
-        // Parse Data
-        const gpsData = gpsFile instanceof File ? parseCSV(await gpsFile.text()) : [];
-        const accelerometerData = accelerometerFile instanceof File ? parseCSV(await accelerometerFile.text()) : [];
+      // Parse Data
+      const gpsData = gpsFile instanceof File ? parseCSV(await gpsFile.text()) : [];
+      const accelerometerData = accelerometerFile instanceof File ? parseCSV(await accelerometerFile.text()) : [];
 
-        // Create Database Record
-        const uploadDoc = await UploadModel.create({
-            video_id: videoId,
-            original_filename: videoFile.name,
-            storage_path: `/uploads/${fileName}`,
-            file_size: videoFile.size,
-            status: 'processing', // Auto-transition to processing
-            gps_data: gpsData,
-            accelerometer_data: accelerometerData,
-            processing_result: {
-                total_frames: null,
-                processed_frames: 0,
-                detections_count: 0
-            },
-            created_at: new Date(),
-            updated_at: new Date(),
-        });
+      // Create Database Record
+      const uploadDoc = await UploadModel.create({
+        video_id: videoId,
+        original_filename: videoFile.name,
+        storage_path: `/uploads/${fileName}`,
+        file_size: videoFile.size,
+        status: 'processing', // Auto-transition to processing
+        gps_data: gpsData,
+        accelerometer_data: accelerometerData,
+        processing_result: {
+          total_frames: null,
+          processed_frames: 0,
+          detections_count: 0
+        },
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
 
-        // ── STEP 1: LIVE TRIGGER ─────────────────────────────────────────────
-        // Fire-and-forget call to the ML Service to start clustering.
-        // We use the video_id to limit the scope of the processing.
-        try {
+      // ── STEP 1: AI DETECTIONS TRIGGER ─────────────────────────────────────
+      // Since we now have the video saved locally, trigger the python script
+      const { spawn } = require('child_process');
+      const pythonScriptPath = path.resolve(process.cwd(), '../ai-detection/detect_road_damage.py');
+      const videoFullPath = path.resolve(uploadsDir, fileName);
+
+      console.log(`[Upload] Triggering AI detection on: ${videoFullPath}`);
+
+      const INTERNAL_KEY = process.env.INTERNAL_API_KEY || 'sadaksurksha_internal_ml_service_2026';
+
+      // We run this detached/asynchronously so it doesn't block the API response
+      const pythonProcess = spawn('python', [
+        pythonScriptPath,
+        '--video', videoFullPath,
+        '--api_url', 'http://localhost:3000/api/v1/detections/bulk',
+        '--export',
+        '--video_id', videoId,
+        '--internal_key', INTERNAL_KEY
+      ], {
+        cwd: path.resolve(process.cwd(), '../ai-detection')
+      });
+
+
+      pythonProcess.stdout.on('data', (data) => {
+        console.log(`[AI Detection - ${videoId}]: ${data.toString().trim()}`);
+      });
+
+      pythonProcess.stderr.on('data', (data) => {
+        console.error(`[AI Detection Error - ${videoId}]: ${data.toString().trim()}`);
+      });
+
+      pythonProcess.on('close', (code) => {
+        console.log(`[AI Detection - ${videoId}] child process exited with code ${code}`);
+        if (code === 0) {
+          // ── STEP 2: ML CLUSTERING TRIGGER ──────────────────────────────
+          try {
             const mlTriggerUrl = `${ML_SERVICE_URL}/ml/clustering/run`;
-            console.log(`[Upload] Triggering ML clustering at: ${mlTriggerUrl}`);
-            
-            // We don't 'await' this so the user gets their 201 response immediately
-            fetch(mlTriggerUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ video_id: videoId, force_recluster: true })
-            }).catch(err => console.error('[Upload] ML Trigger failed (async):', err.message));
-            
-        } catch (mlErr) {
-            console.error('[Upload] ML Trigger sync error:', mlErr.message);
-        }
-        // ─────────────────────────────────────────────────────────────────────
+            console.log(`[Upload] AI complete. Triggering ML clustering at: ${mlTriggerUrl}`);
 
-        return NextResponse.json({
-            success: true,
-            video_id: videoId,
-            video_url: `/uploads/${fileName}`,
-            data_points: {
-                gps: gpsData.length,
-                accelerometer: accelerometerData.length
-            },
-            status: 'processing'
-        }, { status: HTTP_STATUS.CREATED });
+            fetch(mlTriggerUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ video_id: videoId, force_recluster: true })
+            }).catch(err => console.error('[Upload] ML Trigger failed (async):', err.message));
+          } catch (mlErr) {
+            console.error('[Upload] ML Trigger sync error:', mlErr.message);
+          }
+        } else {
+          console.error(`[Upload] AI detection failed for ${videoId}. Skipping clustering.`);
+          UploadModel.updateStatus(videoId, 'failed');
+        }
+      });
+      // ─────────────────────────────────────────────────────────────────────
+
+      return NextResponse.json({
+        success: true,
+        video_id: videoId,
+        video_url: `/uploads/${fileName}`,
+        data_points: {
+          gps: gpsData.length,
+          accelerometer: accelerometerData.length
+        },
+        status: 'processing'
+      }, { status: HTTP_STATUS.CREATED });
 
     } catch (error) {
-        console.error('[UploadController] Error:', error);
-        return NextResponse.json({ error: 'Upload failed', details: error.message }, { status: HTTP_STATUS.INTERNAL_ERROR });
+      console.error('[UploadController] Error:', error);
+      return NextResponse.json({ error: 'Upload failed', details: error.message }, { status: HTTP_STATUS.INTERNAL_ERROR });
     }
   }
 

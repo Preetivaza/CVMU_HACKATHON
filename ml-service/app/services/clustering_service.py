@@ -212,10 +212,12 @@ async def run_clustering(
             repeat_count  = 1
             aging_index   = None
             unique_days   = len(session_days)
+            status        = "pending"
             
             if existing:
                 repeat_count  = existing["properties"].get("repeat_count", 1) + 1
                 aging_index   = existing["properties"].get("aging_index")
+                status        = existing["properties"].get("status", "pending")
                 
                 # Combine session days with existing cluster days
                 existing_first = existing.get("first_detected")
@@ -230,6 +232,13 @@ async def run_clustering(
                 
                 print(f"[Clustering]   ↳ Repeat #{repeat_count} over {unique_days} unique day(s)")
 
+            # Contractor Compliance Logic
+            temporal_status = "REPEAT" if unique_days > 1 else "DUPLICATE"
+            if existing and status in ["repaired", "verified"]:
+                print(f"[Clustering]   ⚠ Contractor Compliance Violation! Repaired cluster detected again.")
+                temporal_status = "compliance_violation"
+                status = "pending" # Re-open the ticket
+
             # 4d. Risk model
             risk_result = RiskModel.calculate(
                 avg_severity=avg_severity, 
@@ -237,8 +246,6 @@ async def run_clustering(
                 repeat_count=repeat_count,
                 unique_days=unique_days
             )
-
-            temporal_status = "REPEAT" if unique_days > 1 else "DUPLICATE"
 
             # 4e. Persist cluster
             if existing:
@@ -266,12 +273,18 @@ async def run_clustering(
                         "properties.final_risk_score": risk_result.final_risk_score,
                         "properties.risk_level":       risk_result.risk_level,
                         "properties.temporal_status":  temporal_status,
+                        "properties.status":           status, # Updated status
                         "last_detected":               last_detected,
                         "updated_at":                  datetime.utcnow(),
                     }}
                 )
                 cluster_id = existing["_id"]
                 session_cluster_ids.add(cluster_id)
+
+                # Trigger Satellite Analysis in background if it's a significant repeat
+                import asyncio
+                if unique_days > 1 and aging_index is None:
+                    asyncio.create_task(satellite_service.run_satellite_analysis(str(cluster_id), list(centroid)))
 
             else:
                 # Create new cluster document
@@ -307,6 +320,9 @@ async def run_clustering(
                 cluster_id = res.inserted_id
                 session_cluster_ids.add(cluster_id)
                 group_clusters_created += 1
+
+                import asyncio
+                asyncio.create_task(satellite_service.run_satellite_analysis(str(cluster_id), list(centroid)))
 
             # Step 5: Write cluster_id back to detections + mark processed
             await detections_col.update_many(

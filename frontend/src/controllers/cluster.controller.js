@@ -30,11 +30,11 @@ export class ClusterController {
     const { isValid, user: tokenUser } = await verifyAuth(request);
     if (isValid) {
       const user = await UserModel.findById(tokenUser.userId);
-      
+
       if (user.role === 'zone_officer' && user.authority_zone) {
         // Only see risks within their assigned Polygon/Ward
-        query.geometry = { 
-          $geoWithin: { $geometry: user.authority_zone } 
+        query.geometry = {
+          $geoWithin: { $geometry: user.authority_zone }
         };
       } else if (user.role === 'state_authority') {
         // State level only cares about Highways
@@ -74,19 +74,28 @@ export class ClusterController {
   /** POST /api/v1/clusters — proxy to FastAPI ML service */
   static async triggerClustering(request) {
     const body = await request.json();
-    const mlResponse = await fetch(`${ML_SERVICE_URL}/ml/clustering/run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ video_id: body.video_id, force_recluster: body.force_recluster || false }),
-    });
 
-    if (!mlResponse.ok) {
-      const errorData = await mlResponse.json().catch(() => ({}));
-      return NextResponse.json({ error: 'Clustering service failed', details: errorData }, { status: mlResponse.status });
+    try {
+      const mlResponse = await fetch(`${ML_SERVICE_URL}/ml/clustering/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_id: body.video_id, force_recluster: body.force_recluster || false }),
+      });
+
+      if (!mlResponse.ok) {
+        const errorData = await mlResponse.json().catch(() => ({}));
+        return NextResponse.json({ error: 'Clustering service failed', details: errorData }, { status: mlResponse.status });
+      }
+
+      const result = await mlResponse.json();
+      return NextResponse.json({ message: 'Clustering completed', ...result });
+    } catch (error) {
+      console.error('[ML Proxy Error] Connection to FastAPI failed:', error.message);
+      return NextResponse.json({
+        error: 'Machine Learning Backend is offline or unreachable.',
+        details: error.message
+      }, { status: 503 }); // 503 Service Unavailable
     }
-
-    const result = await mlResponse.json();
-    return NextResponse.json({ message: 'Clustering completed', ...result });
   }
 
   /** GET /api/v1/clusters/:id */
@@ -134,24 +143,34 @@ export class ClusterController {
       // --- ML SYNC (Member 3 Requirement) ---
       // Notify the ML Service to reset risk/aging if 'repaired'
       try {
-        await fetch(`${ML_SERVICE_URL}/ml/risk/update-status`, {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000); // 3-second timeout
+
+        const response = await fetch(`${ML_SERVICE_URL}/ml/risk/update-status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             cluster_id: id,
             status: body.status,
             notes: body.notes || 'Status updated via Frontend Management System'
-          })
+          }),
+          signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          console.warn(`[ML Sync] Warning: ML service returned ${response.status} for ${id}`);
+        }
       } catch (err) {
-        console.warn(`[ML Sync] Failed to notify ML service about status update for ${id}:`, err.message);
+        console.warn(`[ML Sync] FastAPI unreachable or timed out. ML Sync failed for ${id}:`, err.message);
       }
-    } 
+    }
 
     if (body.assigned_to_user_id) {
       await ClusterModel.updateById(id, { 'properties.assigned_to_user_id': body.assigned_to_user_id });
     }
-    
+
     if (!body.status && !body.assigned_to_user_id) {
       await ClusterModel.updateById(id, {});
     }

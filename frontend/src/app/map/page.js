@@ -1,211 +1,351 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { 
-  ArrowLeft, 
-  MapPin, 
-  AlertTriangle, 
-  CheckCircle2, 
-  Calendar,
-  Layers,
-  Search,
-  Navigation
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { authFetch } from '@/utils/authFetch';
 
-// Dynamically import map to avoid SSR error
-const MapComponent = dynamic(() => import('@/components/MapComponent'), { 
+const MapComponent = dynamic(() => import('@/components/MapComponent'), {
   ssr: false,
-  loading: () => <div className="h-full w-full bg-slate-900 rounded-2xl animate-pulse" />
+  loading: () => (
+    <div style={{
+      width: '100%', height: '100%',
+      background: 'linear-gradient(135deg, #0f172a, #1e293b)',
+      borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      color: '#64748b', fontSize: 14,
+    }}>
+      Loading map...
+    </div>
+  ),
 });
 
-export default function MapPage() {
-  const [clusters, setClusters] = useState([]);
-  const [selectedCluster, setSelectedCluster] = useState(null);
-  const [loading, setLoading] = useState(true);
+const RISK_FILTERS = ['All', 'Critical', 'High', 'Medium', 'Low'];
+const STATUS_LABELS = { pending: 'Pending', in_progress: 'In Progress', repaired: 'Repaired', compliance_violation: '⚠️ Violation' };
+const STATUS_COLORS = { pending: '#f97316', in_progress: '#2563eb', repaired: '#16a34a', compliance_violation: '#dc2626' };
+const RISK_COLORS = { Critical: '#dc2626', High: '#ea580c', Medium: '#ca8a04', Low: '#16a34a' };
+const RISK_BG = { Critical: '#fee2e2', High: '#fff7ed', Medium: '#fefce8', Low: '#f0fdf4' };
 
-  useEffect(() => {
-    fetch('/api/v1/clusters?limit=50')
-      .then(res => res.json())
-      .then(data => {
-        if (data.features) setClusters(data.features);
-        setLoading(false);
-      });
-  }, []);
-
-  const handleUpdateStatus = async (status) => {
-    if (!selectedCluster) return;
-    
-    // Update API
-    const resp = await fetch(`/api/v1/clusters/${selectedCluster._id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        status,
-        notes: `Status changed manually via Map Dashboard.`
-      })
-    });
-
-    if (resp.ok) {
-      const { data: updated } = await resp.json();
-      setClusters(prev => prev.map(c => c._id === updated._id ? updated : c));
-      setSelectedCluster(updated);
-    }
-  };
-
+function RiskBadge({ level }) {
+  const l = level || 'Low';
   return (
-    <div className="h-full flex flex-col gap-6">
-      {/* Dynamic Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-extrabold text-gray-900 flex items-center gap-3 tracking-tight">
-            <Layers className="text-blue-600" size={24} />
-            Live Infrastructure Map
-          </h1>
-          <p className="text-slate-500 text-sm font-medium italic">Visualizing <strong>{clusters.length}</strong> active clusters across <strong>2.4km</strong> monitored road segments.</p>
-        </div>
-        <div className="flex gap-2">
-           <div className="px-4 py-2 bg-emerald-50 rounded-lg border border-emerald-100 text-[10px] font-extrabold text-emerald-600 flex items-center gap-2 uppercase tracking-widest">
-             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-             Live Data Feed
-           </div>
-        </div>
-      </div>
-
-      <div className="flex-1 flex gap-6 min-h-0">
-        {/* Main Map Box */}
-        <div className="flex-[3] relative card shadow-lg overflow-hidden border-2 border-white">
-          <MapComponent clusters={clusters} onClusterClick={(c) => setSelectedCluster(c)} />
-          
-          {/* Quick Floating Actions */}
-          <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2">
-            <button className="p-2.5 bg-white rounded-xl text-gray-600 hover:text-blue-600 shadow-xl border border-gray-100 transition-all active:scale-95"><Search size={20} /></button>
-            <button className="p-2.5 bg-white rounded-xl text-gray-600 hover:text-blue-600 shadow-xl border border-gray-100 transition-all active:scale-95"><Navigation size={20} /></button>
-          </div>
-        </div>
-
-        {/* Sidebar Detail Panel */}
-        <AnimatePresence mode='wait'>
-          {selectedCluster ? (
-            <motion.aside 
-              key="cluster-detail"
-              initial={{ x: 50, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 50, opacity: 0 }}
-              className="flex-1 card p-6 overflow-y-auto min-w-[380px] bg-white border-l-4 border-blue-500 shadow-2xl"
-            >
-              <button 
-                onClick={() => setSelectedCluster(null)}
-                className="text-xs font-bold text-gray-400 flex items-center gap-1 mb-6 hover:text-blue-600 transition-colors uppercase tracking-widest"
-              >
-                <ArrowLeft size={14} /> Back to Overview
-              </button>
-
-              <div className="space-y-8">
-                <header>
-                  <div className={`w-fit px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-[0.2em] mb-3 border ${getRiskBadge(selectedCluster.properties.risk_level)}`}>
-                    {selectedCluster.properties.risk_level} Priority
-                  </div>
-                  <h2 className="text-2xl font-extrabold text-gray-900 leading-tight tracking-tight uppercase">
-                    {selectedCluster.properties.damage_type || 'Multiple Anomalies'}
-                  </h2>
-                  <div className="text-gray-400 flex items-center gap-1.5 text-xs font-bold mt-2 uppercase tracking-tight">
-                    <MapPin size={14} className="text-red-500" />
-                    {selectedCluster.geometry.coordinates[1].toFixed(6)}, {selectedCluster.geometry.coordinates[0].toFixed(6)}
-                  </div>
-                </header>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <DetailBox label="Risk Index" value={selectedCluster.properties.final_risk_score} />
-                  <DetailBox label="Confidence" value={`${(selectedCluster.properties.avg_confidence * 100).toFixed(0)}%`} />
-                  <DetailBox label="Feature Points" value={selectedCluster.properties.points_count} />
-                  <DetailBox label="Audit Count" value={selectedCluster.properties.repeat_count || 1} />
-                </div>
-
-                <div className="space-y-4 pt-6 border-t border-gray-50">
-                  <h4 className="text-[10px] font-black uppercase tracking-[0.25em] text-gray-400 mb-4">Command Actions</h4>
-                  <div className="grid grid-cols-1 gap-3">
-                    <StatusBtn 
-                      active={selectedCluster.properties.status === 'pending'} 
-                      icon={<AlertTriangle size={18} />} 
-                      label="Mark Pending Review" 
-                      onClick={() => handleUpdateStatus('pending')}
-                    />
-                    <StatusBtn 
-                      active={selectedCluster.properties.status === 'in_progress'} 
-                      icon={<Clock size={16} />} 
-                      label="Deploy Maintenance" 
-                      onClick={() => handleUpdateStatus('in_progress')}
-                    />
-                    <StatusBtn 
-                      active={selectedCluster.properties.status === 'repaired'} 
-                      icon={<CheckCircle2 size={16} />} 
-                      label="Repair Verified" 
-                      onClick={() => handleUpdateStatus('repaired')}
-                    />
-                  </div>
-                </div>
-
-                <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 text-[11px] text-gray-500 font-medium">
-                  <div className="flex items-center gap-2 mb-2 font-black text-gray-400 uppercase tracking-widest">
-                    <Calendar size={12} />
-                    Detection Timeline
-                  </div>
-                  <p>Initial: {new Date(selectedCluster.first_detected).toLocaleString()}</p>
-                </div>
-              </div>
-            </motion.aside>
-          ) : (
-             <motion.aside 
-                key="empty-state"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex-1 card p-10 flex flex-col items-center justify-center text-center bg-white shadow-xl"
-             >
-                <div className="w-16 h-16 bg-blue-50 rounded-3xl flex items-center justify-center mb-6 text-blue-600 shadow-inner">
-                  <Layers size={32} />
-                </div>
-                <h3 className="text-xl font-extrabold text-gray-900 tracking-tight">No Cluster Selected</h3>
-                <p className="text-sm text-gray-500 font-medium mt-2 leading-relaxed">
-                  Select a point on the live map to trigger forensic depth analysis, view damage history, or authorize repairs.
-                </p>
-             </motion.aside>
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
+    <span style={{
+      display: 'inline-block',
+      padding: '2px 8px', borderRadius: 4,
+      fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase',
+      background: RISK_BG[l] || '#f1f5f9', color: RISK_COLORS[l] || '#64748b',
+    }}>
+      {l}
+    </span>
   );
 }
 
-function DetailBox({ label, value }) {
+function StatusBtn({ status, current, onClick }) {
+  const active = status === current;
   return (
-    <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 shadow-sm transition-transform hover:scale-[1.02]">
-      <span className="text-[9px] uppercase font-black text-gray-400 tracking-[0.2em] block mb-1">{label}</span>
-      <span className="text-xl font-extrabold text-gray-900 tracking-tight">{value}</span>
-    </div>
-  );
-}
-
-function StatusBtn({ icon, label, active, onClick }) {
-  return (
-    <button 
-      onClick={onClick}
-      className={`
-        w-full flex items-center gap-4 px-5 py-4 rounded-xl transition-all duration-300 font-extrabold text-xs uppercase tracking-wider
-        ${active ? 'bg-[#2563eb] text-white shadow-xl shadow-blue-500/30 ring-4 ring-blue-50' : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-gray-100'}
-      `}
+    <button
+      onClick={() => onClick(status)}
+      style={{
+        padding: '9px 14px', borderRadius: 8, border: 'none',
+        background: active ? '#2563eb' : '#f8fafc',
+        color: active ? 'white' : '#64748b',
+        fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+        width: '100%', textAlign: 'left',
+        display: 'flex', alignItems: 'center', gap: 8,
+        borderLeft: active ? '3px solid #1d4ed8' : '3px solid transparent',
+        transition: 'all 0.15s',
+        boxShadow: active ? '0 2px 8px rgba(37,99,235,0.25)' : 'none',
+      }}
     >
-      <div className={active ? 'scale-110' : ''}>{icon}</div>
-      {label}
-      {active && <div className="ml-auto w-2 h-2 rounded-full bg-white animate-pulse" />}
+      <span style={{
+        width: 8, height: 8, borderRadius: '50%',
+        background: active ? 'white' : STATUS_COLORS[status] || '#94a3b8',
+        flexShrink: 0,
+      }} />
+      {STATUS_LABELS[status]}
+      {active && <span style={{ marginLeft: 'auto', fontSize: 10 }}>✓</span>}
     </button>
   );
 }
 
-function getRiskBadge(level) {
-  if (level === 'Critical') return 'bg-red-50 text-red-600 border-red-100';
-  if (level === 'High') return 'bg-orange-50 text-orange-600 border-orange-100';
-  return 'bg-blue-50 text-blue-600 border-blue-100';
-}
+export default function MapPage() {
+  const [clusters, setClusters] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [filter, setFilter] = useState('All');
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [showHeatmap, setShowHeatmap] = useState(false);
 
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await authFetch('/api/v1/clusters?limit=100');
+      const data = await res.json();
+      if (data.features) setClusters(data.features);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = filter === 'All'
+    ? clusters
+    : clusters.filter(c => (c.properties?.risk_level || '').toLowerCase() === filter.toLowerCase());
+
+  const handleStatusUpdate = async (status) => {
+    if (!selected || updating) return;
+    setUpdating(true);
+    setMsg(null);
+    try {
+      const resp = await authFetch(`/api/v1/clusters/${selected.properties?._id || selected._id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status, notes: `Updated via Map Dashboard - ${new Date().toISOString()}` }),
+      });
+      if (resp.ok) {
+        const { data: updated } = await resp.json();
+        setClusters(prev => prev.map(c => {
+          const id = c.properties?._id || c._id;
+          return id === (updated._id || updated.properties?._id || selected._id) ? { ...c, properties: { ...c.properties, status } } : c;
+        }));
+        setSelected(s => ({ ...s, properties: { ...s.properties, status } }));
+        setMsg({ type: 'success', text: `Status updated to "${STATUS_LABELS[status]}"` });
+      } else {
+        setMsg({ type: 'error', text: 'Update failed. Please try again.' });
+      }
+    } catch {
+      setMsg({ type: 'error', text: 'Network error during update.' });
+    } finally {
+      setUpdating(false);
+      setTimeout(() => setMsg(null), 3000);
+    }
+  };
+
+  const riskCounts = ['Critical', 'High', 'Medium', 'Low'].reduce((acc, level) => {
+    acc[level] = clusters.filter(c => (c.properties?.risk_level || '').toLowerCase() === level.toLowerCase()).length;
+    return acc;
+  }, {});
+
+  return (
+    <div style={{ height: 'calc(100vh - 60px - 56px)', display: 'flex', flexDirection: 'column', gap: 0 }} className="fade-in">
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexShrink: 0 }}>
+        <div>
+          <p className="page-eyebrow">Live Infrastructure</p>
+          <h1 className="page-title">Road Damage Map</h1>
+          <p className="page-subtitle">
+            Showing <strong>{filtered.length}</strong> of <strong>{clusters.length}</strong> clusters
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 20, padding: '5px 14px',
+          }}>
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', animation: 'pulse-dot 2s ease-in-out infinite' }} />
+            <span style={{ fontSize: 11, fontWeight: 800, color: '#15803d', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Live Feed</span>
+          </div>
+          <button onClick={load} className="btn btn-secondary btn-sm">🔄 Refresh</button>
+          <button
+            onClick={() => setShowHeatmap(h => !h)}
+            style={{
+              padding: '7px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              background: showHeatmap ? '#7c3aed' : '#f1f5f9',
+              color: showHeatmap ? 'white' : '#64748b',
+              fontSize: 12, fontWeight: 700, transition: 'all 0.2s',
+            }}
+          >
+            🌡️ {showHeatmap ? 'Heatmap ON' : 'Heatmap OFF'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', gap: 20, minHeight: 0 }}>
+
+        {/* Left Sidebar — Filters + Cluster List */}
+        <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
+
+          {/* Risk Filter */}
+          <div className="panel">
+            <div className="panel-header" style={{ borderBottom: '1px solid #f1f5f9', padding: '12px 16px' }}>
+              <div className="panel-title" style={{ fontSize: 13 }}>🎯 Filter by Risk Level</div>
+            </div>
+            <div style={{ padding: '10px 10px' }}>
+              {RISK_FILTERS.map(f => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  style={{
+                    width: '100%', padding: '7px 12px', borderRadius: 7, border: 'none',
+                    background: filter === f ? '#eff6ff' : 'transparent',
+                    color: filter === f ? '#2563eb' : '#64748b',
+                    fontSize: 13, fontWeight: filter === f ? 700 : 500,
+                    cursor: 'pointer', textAlign: 'left', marginBottom: 2,
+                    borderLeft: filter === f ? '3px solid #2563eb' : '3px solid transparent',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}
+                >
+                  <span>{f === 'All' ? '📍 All Clusters' : `🔴 ${f}`}</span>
+                  <span style={{
+                    background: filter === f ? '#2563eb' : '#f1f5f9',
+                    color: filter === f ? 'white' : '#94a3b8',
+                    borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700,
+                  }}>
+                    {f === 'All' ? clusters.length : (riskCounts[f] || 0)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Cluster List */}
+          <div className="panel" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div className="panel-header" style={{ borderBottom: '1px solid #f1f5f9', padding: '12px 16px', flexShrink: 0 }}>
+              <div className="panel-title" style={{ fontSize: 13 }}>📋 Cluster List</div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
+              {loading ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading...</div>
+              ) : filtered.length === 0 ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No clusters matching filter</div>
+              ) : filtered.map((c, i) => {
+                const isActive = selected && (selected.properties?._id === c.properties?._id);
+                const level = c.properties?.risk_level || 'Low';
+                return (
+                  <div
+                    key={i}
+                    onClick={() => setSelected(isActive ? null : c)}
+                    style={{
+                      padding: '10px 12px', borderRadius: 8, marginBottom: 4, cursor: 'pointer',
+                      background: isActive ? '#eff6ff' : 'transparent',
+                      border: isActive ? '1px solid #bfdbfe' : '1px solid transparent',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f8fafc'; }}
+                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
+                        Cluster #{i + 1}
+                      </span>
+                      <RiskBadge level={level} />
+                    </div>
+                    <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace' }}>
+                      {c.geometry?.coordinates
+                        ? `${c.geometry.coordinates[1].toFixed(4)}, ${c.geometry.coordinates[0].toFixed(4)}`
+                        : '—'
+                      }
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 3 }}>
+                      Risk: <strong style={{ color: RISK_COLORS[level] }}>{Math.round((c.properties?.final_risk_score || 0) * 100)}%</strong>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Main Map */}
+        <div style={{ flex: 1, borderRadius: 12, overflow: 'hidden', position: 'relative', minWidth: 0 }}>
+          <MapComponent clusters={filtered} onClusterClick={setSelected} showHeatmap={showHeatmap} />
+        </div>
+
+        {/* Right Sidebar — Cluster Detail */}
+        {selected && (
+          <div className="panel slide-right" style={{
+            width: 320, flexShrink: 0, overflowY: 'auto',
+            borderLeft: '3px solid #2563eb',
+          }}>
+            <div style={{ padding: '16px 18px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="panel-title">Cluster Details</div>
+              <button onClick={() => setSelected(null)} style={{
+                background: '#f1f5f9', border: 'none', borderRadius: 6,
+                width: 28, height: 28, cursor: 'pointer', fontSize: 16,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>×</button>
+            </div>
+
+            <div style={{ padding: '18px' }}>
+              {/* Risk Level */}
+              <div style={{ marginBottom: 18 }}>
+                <RiskBadge level={selected.properties?.risk_level} />
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginTop: 8 }}>
+                  {selected.properties?.damage_type || 'Multiple Anomalies'}
+                </div>
+                <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 4, fontFamily: 'monospace' }}>
+                  📍 {selected.geometry?.coordinates?.[1]?.toFixed(6)}, {selected.geometry?.coordinates?.[0]?.toFixed(6)}
+                  <button
+                    onClick={() => {
+                      if (selected.geometry?.coordinates) {
+                        navigator.clipboard.writeText(`${selected.geometry.coordinates[1]},${selected.geometry.coordinates[0]}`);
+                      }
+                    }}
+                    style={{ marginLeft: 8, fontSize: 10, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer' }}
+                  >Copy</button>
+                </div>
+              </div>
+
+              {/* Stats Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
+                {[
+                  { label: 'Risk Index', value: `${Math.round((selected.properties?.final_risk_score || 0) * 100)}%` },
+                  { label: 'Confidence', value: `${Math.round((selected.properties?.avg_confidence || 0) * 100)}%` },
+                  { label: 'Feature Points', value: selected.properties?.points_count || '—' },
+                  { label: 'Repeat Count', value: `${selected.properties?.repeat_count || 1}×` },
+                ].map(({ label, value }, i) => (
+                  <div key={i} style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 12px', border: '1px solid #f1f5f9' }}>
+                    <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#94a3b8', fontWeight: 700, marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: '#0f172a' }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Message */}
+              {msg && (
+                <div style={{
+                  padding: '10px 12px', borderRadius: 8, marginBottom: 14,
+                  background: msg.type === 'success' ? '#f0fdf4' : '#fef2f2',
+                  color: msg.type === 'success' ? '#15803d' : '#dc2626',
+                  fontSize: 12.5, fontWeight: 600,
+                  border: `1px solid ${msg.type === 'success' ? '#bbf7d0' : '#fca5a5'}`,
+                }}>
+                  {msg.type === 'success' ? '✅' : '❌'} {msg.text}
+                </div>
+              )}
+
+              {/* Status Update */}
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>
+                  Update Status
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {Object.keys(STATUS_LABELS).map(s => (
+                    <StatusBtn
+                      key={s}
+                      status={s}
+                      current={selected.properties?.status}
+                      onClick={handleStatusUpdate}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Timeline */}
+              {selected.first_detected && (
+                <div style={{ padding: '12px', background: '#f8fafc', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
+                    🕐 Detection Timeline
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>
+                    First detected: {new Date(selected.first_detected).toLocaleString()}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

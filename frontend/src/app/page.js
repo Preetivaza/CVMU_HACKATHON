@@ -1,281 +1,404 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
+import { authFetch } from '@/utils/authFetch';
 
-// --- Icon components (inline SVG for guaranteed render) ---
-const IconStack = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-  </svg>
-);
-const IconTriangle = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
-    <path d="M12 9v4M12 17h.01"/>
-  </svg>
-);
-const IconCheck = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-    <path d="m9 11 3 3L22 4"/>
-  </svg>
-);
-const IconWave = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-  </svg>
-);
-const IconPin = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-    <circle cx="12" cy="10" r="3"/>
-  </svg>
-);
-const IconActivity = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-  </svg>
-);
-const IconEye = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
-    <circle cx="12" cy="12" r="3"/>
-  </svg>
-);
-const IconArrow = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M5 12h14M12 5l7 7-7 7"/>
-  </svg>
-);
-const IconChevron = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m9 18 6-6-6-6"/>
-  </svg>
-);
+const RISK_COLORS = { Critical: '#dc2626', High: '#ea580c', Medium: '#ca8a04', Low: '#16a34a' };
+const RISK_BG = { Critical: '#fee2e2', High: '#fff7ed', Medium: '#fefce8', Low: '#f0fdf4' };
+
+// Cost model per damage type (INR in thousands)
+const REPAIR_COSTS = { pothole: 45, crack: 18, patch: 12, depression: 28, unknown: 20 };
+const SEVERITY_MULTIPLIER = { Critical: 2.5, High: 1.6, Medium: 1.0, Low: 0.6 };
+
+function StatCard({ icon, color, bg, label, value, sub, href }) {
+  const inner = (
+    <div className="stat-card" style={{ animationDelay: `${0}ms` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+        <div style={{ width: 44, height: 44, borderRadius: 10, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>
+          {icon}
+        </div>
+        {href && <span style={{ fontSize: 11, color: '#2563eb', fontWeight: 600 }}>View →</span>}
+      </div>
+      <div className="stat-value">{value ?? '—'}</div>
+      <div className="stat-label">{label}</div>
+      <div className="stat-sub">{sub}</div>
+    </div>
+  );
+  if (href) return <Link href={href} style={{ textDecoration: 'none' }}>{inner}</Link>;
+  return inner;
+}
+
+function RiskBadge({ level }) {
+  const l = level || 'Low';
+  return (
+    <span className={`badge badge-${l.toLowerCase()}`} style={{ color: RISK_COLORS[l], background: RISK_BG[l] }}>
+      {l}
+    </span>
+  );
+}
+
+function SystemHealthRow({ label, status, pct, color }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 500, color: '#334155' }}>{label}</span>
+        <span style={{ fontSize: 10, fontWeight: 800, color, letterSpacing: '0.07em' }}>{status}</span>
+      </div>
+      <div className="progress-track">
+        <div className="progress-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
+    </div>
+  );
+}
+
+/** Compute Infrastructure Health Score (0-100) */
+function computeHealthScore(clusters) {
+  if (clusters.length === 0) return 100;
+  const avgRisk = clusters.reduce((s, c) => s + (c.risk_score || 0), 0) / clusters.length;
+  const critPct = clusters.filter(c => (c.risk_level || '').toLowerCase() === 'critical').length / clusters.length;
+  const repairedPct = clusters.filter(c => c.status === 'repaired').length / clusters.length;
+  const score = Math.max(0, Math.min(100,
+    100 - (avgRisk * 0.5) - (critPct * 35) + (repairedPct * 15)
+  ));
+  return Math.round(score);
+}
+
+/** Estimate repair cost for a list of clusters */
+function estimateRepairCost(clusters) {
+  return clusters.reduce((total, c) => {
+    const types = c.damage_types || {};
+    const level = c.risk_level || 'Low';
+    const mult = SEVERITY_MULTIPLIER[level] || 1;
+    const typeCost = Object.entries(types).reduce((s, [t, cnt]) => s + (REPAIR_COSTS[t] || 20) * cnt, 0);
+    return total + typeCost * mult;
+  }, 0);
+}
 
 export default function Dashboard() {
   const [stats, setStats] = useState({ totalClusters: 0, critical: 0, repaired: 0, recentUploads: 0 });
   const [clusters, setClusters] = useState([]);
+  const [allClusters, setAllClusters] = useState([]);
+  const [trend, setTrend] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [processingUploads, setProcessingUploads] = useState([]);
+  const [pollTimer, setPollTimer] = useState(null);
 
-  useEffect(() => {
-    fetch('/api/v1/debug')
-      .then(r => r.json())
-      .then(data => {
-        if (data.success) {
-          setStats(prev => ({
-            ...prev,
-            totalClusters: data.counts?.clusters || 0,
-            recentUploads: data.counts?.uploads || 0,
-          }));
-        }
-      }).catch(() => {});
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [debugRes, rankRes, trendRes, allRes] = await Promise.all([
+        authFetch('/api/v1/debug').then(r => r.json()).catch(() => ({})),
+        authFetch('/api/v1/analytics/priority-ranking?limit=5').then(r => r.json()).catch(() => ({})),
+        authFetch('/api/v1/analytics/monthly-trend').then(r => r.json()).catch(() => ({})),
+        authFetch('/api/v1/clusters?limit=500').then(r => r.json()).catch(() => ({})),
+      ]);
 
-    fetch('/api/v1/analytics/priority-ranking?limit=3')
-      .then(r => r.json())
-      .then(data => { if (data.ranking) setClusters(data.ranking); })
-      .catch(() => {});
+      if (debugRes.success) {
+        const critCount = (rankRes.ranking || []).filter(c => (c.risk_level || '').toLowerCase() === 'critical').length;
+        const repaired = (rankRes.ranking || []).filter(c => c.status === 'repaired').length;
+        setStats({
+          totalClusters: debugRes.data_summary?.clusters_count || 0,
+          recentUploads: debugRes.data_summary?.uploads_count || 0,
+          critical: critCount,
+          repaired,
+        });
+      }
+      setClusters(rankRes.ranking || []);
+      setAllClusters((allRes.features || []).map(f => f.properties || f));
+      setTrend(trendRes.trend || []);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const barStyles = [100, 80, 100, 65];
-  const barColors = ['#22c55e', '#2563eb', '#22c55e', '#f97316'];
-  const healthItems = [
-    { label: 'AI Detection Engine', status: 'ONLINE',  color: '#16a34a', idx: 0 },
-    { label: 'Satellite GEE Feed',   status: 'ACTIVE',  color: '#2563eb', idx: 1 },
-    { label: 'Database Sync',         status: 'SYNCED',  color: '#16a34a', idx: 2 },
-    { label: 'Storage Pool',          status: '65% USED',color: '#f97316', idx: 3 },
+  // Poll for processing uploads
+  const pollUploads = useCallback(async () => {
+    try {
+      const res = await authFetch('/api/upload/video');
+      const data = await res.json();
+      const processing = (data.data || []).filter(u => u.status === 'processing');
+      setProcessingUploads(processing);
+      if (processing.length > 0) {
+        const t = setTimeout(pollUploads, 5000);
+        setPollTimer(t);
+      }
+    } catch { }
+  }, []);
+
+  useEffect(() => { load(); pollUploads(); return () => { if (pollTimer) clearTimeout(pollTimer); }; }, [load, pollUploads]);
+
+  const maxTrend = Math.max(...trend.map(t => t.total_detections || 0), 1);
+  const healthScore = computeHealthScore(allClusters);
+  const totalCost = estimateRepairCost(allClusters);
+  const critCost = estimateRepairCost(allClusters.filter(c => (c.risk_level || '').toLowerCase() === 'critical'));
+
+  const healthColor = healthScore >= 75 ? '#16a34a' : healthScore >= 50 ? '#ca8a04' : '#dc2626';
+  const healthLabel = healthScore >= 75 ? 'Good' : healthScore >= 50 ? 'Fair' : 'Critical';
+
+  const statCards = [
+    { icon: '🗂️', color: '#2563eb', bg: '#eff6ff', label: 'Active Clusters', value: stats.totalClusters, sub: 'Damage zones detected', href: '/map' },
+    { icon: '🚨', color: '#dc2626', bg: '#fee2e2', label: 'Critical Risk', value: stats.critical, sub: 'Require immediate repair', href: '/analytics' },
+    { icon: '✅', color: '#16a34a', bg: '#f0fdf4', label: 'Repairs Completed', value: stats.repaired, sub: 'This reporting period' },
+    { icon: '📹', color: '#0284c7', bg: '#f0f9ff', label: 'Videos Processed', value: stats.recentUploads, sub: 'Survey footage analyzed', href: '/upload' },
   ];
 
-  return (
-    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", maxWidth: 1280, margin: '0 auto' }}>
+  // AI Insights
+  const criticalClusters = allClusters.filter(c => (c.risk_level || '').toLowerCase() === 'critical').length;
+  const repeatClusters = allClusters.filter(c => (c.repeat_count || 1) > 2).length;
+  const violationClusters = allClusters.filter(c => c.temporal_status === 'compliance_violation').length;
+  const insights = [
+    criticalClusters > 0 && { type: 'critical', icon: '🚨', text: `${criticalClusters} critical cluster${criticalClusters > 1 ? 's' : ''} require immediate dispatch`, action: 'View on Map', href: '/map' },
+    repeatClusters > 0 && { type: 'warning', icon: '🔁', text: `${repeatClusters} zone${repeatClusters > 1 ? 's' : ''} with repeat detection — chronic damage pattern`, action: 'View Report', href: '/reports' },
+    violationClusters > 0 && { type: 'error', icon: '⚠️', text: `${violationClusters} contractor compliance violation${violationClusters > 1 ? 's' : ''} detected`, action: 'Reports', href: '/reports' },
+    stats.totalClusters === 0 && { type: 'info', icon: '📤', text: 'No data yet. Upload survey footage to begin AI analysis.', action: 'Upload Now', href: '/upload' },
+  ].filter(Boolean);
 
-      {/* ---- Page Header ---- */}
+  return (
+    <div style={{ maxWidth: 1280, margin: '0 auto' }} className="fade-in">
+
+      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 }}>
         <div>
-          <p style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 }}>
-            Dashboard Overview
-          </p>
-          <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.15, marginBottom: 6 }}>
-            Infrastructure Control Centre
-          </h1>
-          <p style={{ fontSize: 13, color: '#64748b', fontWeight: 400 }}>
-            Real-time monitoring of road damage clusters across active surveillance zones.
-          </p>
+          <p className="page-eyebrow">Overview</p>
+          <h1 className="page-title">Infrastructure Control Centre</h1>
+          <p className="page-subtitle">Real-time monitoring of road damage clusters across active surveillance zones.</p>
         </div>
-        <a href="/map" style={{
-          display: 'inline-flex', alignItems: 'center', gap: 8,
-          background: '#2563eb',
-          color: 'white',
-          borderRadius: 8,
-          padding: '10px 18px',
-          fontWeight: 700,
-          fontSize: 13,
-          textDecoration: 'none',
-          whiteSpace: 'nowrap',
-          marginTop: 4,
-          boxShadow: '0 2px 8px rgba(37,99,235,0.3)',
+        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          <button onClick={load} className="btn btn-secondary btn-sm">🔄 Refresh</button>
+          <Link href="/map" className="btn btn-primary btn-sm">Open Live Map →</Link>
+        </div>
+      </div>
+
+      {/* AI Processing Progress Banner */}
+      {processingUploads.length > 0 && (
+        <div style={{
+          marginBottom: 20, padding: '14px 18px', borderRadius: 10,
+          background: 'linear-gradient(135deg, #eff6ff, #f0f9ff)',
+          border: '1px solid #bfdbfe',
+          display: 'flex', alignItems: 'center', gap: 14,
         }}>
-          Open Live Map <IconArrow />
-        </a>
-      </div>
+          <div style={{ width: 20, height: 20, borderRadius: '50%', border: '3px solid #2563eb', borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#1d4ed8' }}>
+              🤖 AI Detection Running — {processingUploads.length} video{processingUploads.length > 1 ? 's' : ''} processing
+            </div>
+            <div style={{ fontSize: 11, color: '#3b82f6', marginTop: 2 }}>
+              {processingUploads.map(u => u.video_id).join(', ')} · Results will appear automatically
+            </div>
+          </div>
+          <div style={{ marginLeft: 'auto' }}>
+            <div style={{ width: 200, height: 6, background: '#bfdbfe', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: '60%', background: 'linear-gradient(90deg, #2563eb, #7c3aed)', borderRadius: 3, animation: 'progressPulse 1.5s ease-in-out infinite' }} />
+            </div>
+          </div>
+          <style>{`@keyframes progressPulse { 0%,100%{opacity:1}50%{opacity:0.5} } @keyframes spin { to{transform:rotate(360deg)} }`}</style>
+        </div>
+      )}
 
-      {/* ---- Stat Cards ---- */}
+      {/* Stat Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
-        <StatCard icon={<IconStack />}     iconBg="#eff6ff" label="Active Clusters"    sub="Total anomalies detected"    value={stats.totalClusters} />
-        <StatCard icon={<IconTriangle />}  iconBg="#fef2f2" label="Critical Risk"       sub="Require immediate action"    value={stats.critical} />
-        <StatCard icon={<IconCheck />}     iconBg="#f0fdf4" label="Repairs Completed"  sub="This month"                  value={stats.repaired} />
-        <StatCard icon={<IconWave />}      iconBg="#f0f9ff" label="Videos Processed"   sub="AI engine active"            value={stats.recentUploads} />
+        {statCards.map((c, i) => <StatCard key={i} {...c} />)}
       </div>
 
-      {/* ---- Bottom Grid ---- */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20 }}>
+      {/* AI Insights Banner */}
+      {insights.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          {insights.map((ins, i) => {
+            const styles = {
+              critical: { bg: '#fee2e2', border: '#fca5a5', color: '#dc2626', btnBg: '#dc2626' },
+              warning: { bg: '#fff7ed', border: '#fed7aa', color: '#c2410c', btnBg: '#ea580c' },
+              error: { bg: '#fdf4ff', border: '#e9d5ff', color: '#7e22ce', btnBg: '#7c3aed' },
+              info: { bg: '#eff6ff', border: '#bfdbfe', color: '#1d4ed8', btnBg: '#2563eb' },
+            };
+            const s = styles[ins.type] || styles.info;
+            return (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10,
+                padding: '12px 16px', borderRadius: 10,
+                background: s.bg, border: `1px solid ${s.border}`,
+              }}>
+                <span style={{ fontSize: 18, flexShrink: 0 }}>{ins.icon}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: s.color, flex: 1 }}>{ins.text}</span>
+                <Link href={ins.href} style={{
+                  padding: '5px 12px', borderRadius: 6, background: s.btnBg,
+                  color: 'white', fontSize: 11, fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap',
+                }}>
+                  {ins.action} →
+                </Link>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Main Content Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20 }}>
 
         {/* Priority Work Orders */}
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '20px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div className="panel">
+          <div className="panel-header">
             <div>
-              <h2 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', marginBottom: 3 }}>Priority Work Orders</h2>
-              <p style={{ fontSize: 12, color: '#94a3b8', fontWeight: 400 }}>High-risk clusters requiring immediate dispatch</p>
+              <div className="panel-title">Priority Work Orders</div>
+              <div className="panel-subtitle">High-risk clusters requiring immediate dispatch</div>
             </div>
-            <a href="/map" style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              border: '1px solid #e2e8f0', borderRadius: 7,
-              padding: '6px 14px',
-              fontSize: 12, fontWeight: 600, color: '#2563eb',
-              textDecoration: 'none',
-              background: '#fff',
-            }}>
-              View on Map <span style={{ fontSize: 14 }}>→</span>
-            </a>
+            <Link href="/map" className="btn btn-secondary btn-sm">View on Map →</Link>
           </div>
 
-          {/* Table Header */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1.2fr 0.9fr 0.7fr', borderBottom: '1px solid #f1f5f9', paddingBottom: 10, marginBottom: 4 }}>
-            {['LOCATION', 'DAMAGE TYPE', 'RISK SCORE', 'STATUS', 'ACTION'].map(h => (
-              <div key={h} style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', letterSpacing: '0.08em' }}>{h}</div>
-            ))}
-          </div>
-
-          {/* Rows */}
-          {clusters.length > 0 ? clusters.map((c, i) => (
-            <div key={i} style={{
-              display: 'grid', gridTemplateColumns: '1.4fr 1fr 1.2fr 0.9fr 0.7fr',
-              alignItems: 'center',
-              padding: '14px 0',
-              borderBottom: i < clusters.length - 1 ? '1px solid #f8fafc' : 'none',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b', fontWeight: 500 }}>
-                <IconPin />
-                {c.location.coordinates[1].toFixed(4)}, {c.location.coordinates[0].toFixed(4)}
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-                {c.damage_types ? Object.keys(c.damage_types).map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ') : 'Multiple'}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ flex: 1, height: 5, background: '#fee2e2', borderRadius: 3, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${Math.min(c.risk_score, 100)}%`, background: '#ef4444', borderRadius: 3 }} />
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', minWidth: 24 }}>{Math.round(c.risk_score)}</span>
-              </div>
-              <div>
-                <span style={{ fontSize: 10, fontWeight: 800, color: '#dc2626', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: '3px 8px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                  {c.risk_level || 'Critical'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>
-                <IconEye /> Inspect
-              </div>
+          {loading ? (
+            <div style={{ padding: '48px 20px', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+              Loading cluster data...
             </div>
-          )) : (
-            <div style={{ padding: '40px 0', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
-              No active high-risk clusters detected.
+          ) : clusters.length > 0 ? (
+            <div className="table-container" style={{ border: 'none', borderRadius: 0 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Location</th>
+                    <th>Damage Type</th>
+                    <th>Risk Score</th>
+                    <th>Priority</th>
+                    <th>Est. Cost</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clusters.map((c, i) => {
+                    const types = c.damage_types || {};
+                    const cost = Math.round(estimateRepairCost([c]));
+                    return (
+                      <tr key={i}>
+                        <td style={{ fontWeight: 700, color: '#94a3b8' }}>#{i + 1}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12, color: '#64748b' }}>
+                          {c.location?.coordinates
+                            ? `${c.location.coordinates[1].toFixed(4)}, ${c.location.coordinates[0].toFixed(4)}`
+                            : '—'}
+                        </td>
+                        <td style={{ fontWeight: 600, color: '#0f172a' }}>
+                          {Object.keys(types).slice(0, 2).map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ') || 'Multiple'}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 60, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${Math.min(c.risk_score, 100)}%`, background: '#ef4444', borderRadius: 3 }} />
+                            </div>
+                            <span style={{ fontWeight: 800, color: '#0f172a', fontSize: 13 }}>{Math.round(c.risk_score || 0)}%</span>
+                          </div>
+                        </td>
+                        <td><RiskBadge level={c.risk_level} /></td>
+                        <td style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
+                          ₹{cost}K
+                        </td>
+                        <td>
+                          <Link href="/map" style={{
+                            fontSize: 12, fontWeight: 700, color: '#2563eb', textDecoration: 'none',
+                            padding: '4px 10px', background: '#eff6ff', borderRadius: 5, border: '1px solid #bfdbfe',
+                          }}>
+                            Inspect
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ padding: '48px 20px', textAlign: 'center' }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>No Active Work Orders</div>
+              <div style={{ fontSize: 12, color: '#94a3b8' }}>All clusters are at acceptable risk levels.</div>
             </div>
           )}
         </div>
 
-        {/* Right Column: System Health + Monthly Snapshot */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Right Column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+          {/* Infrastructure Health Score */}
+          <div className="panel">
+            <div className="panel-header" style={{ borderBottom: '1px solid #f1f5f9' }}>
+              <div className="panel-title">🏥 Infrastructure Health</div>
+            </div>
+            <div className="panel-body" style={{ textAlign: 'center', paddingTop: 12 }}>
+              <div style={{ position: 'relative', width: 100, height: 100, margin: '0 auto 14px' }}>
+                <svg viewBox="0 0 36 36" style={{ transform: 'rotate(-90deg)', width: '100%', height: '100%' }}>
+                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f1f5f9" strokeWidth="2.5" />
+                  <circle
+                    cx="18" cy="18" r="15.9" fill="none"
+                    stroke={healthColor} strokeWidth="2.5" strokeLinecap="round"
+                    strokeDasharray={`${healthScore} 100`}
+                    style={{ transition: 'stroke-dasharray 1s ease' }}
+                  />
+                </svg>
+                <div style={{
+                  position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: healthColor }}>{healthScore}</div>
+                  <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, letterSpacing: '0.08em' }}>SCORE</div>
+                </div>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: healthColor, marginBottom: 4 }}>
+                {healthLabel} Condition
+              </div>
+              <div style={{ fontSize: 11, color: '#64748b' }}>Composite road quality index</div>
+              <div style={{ marginTop: 14 }}>
+                {[
+                  { label: 'Avg Risk', value: allClusters.length > 0 ? `${Math.round(allClusters.reduce((s, c) => s + (c.final_risk_score || c.risk_score || 0), 0) / allClusters.length * 100)}%` : '—' },
+                  { label: 'Repair Rate', value: allClusters.length > 0 ? `${Math.round(allClusters.filter(c => c.status === 'repaired').length / allClusters.length * 100)}%` : '—' },
+                ].map(({ label, value }) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid #f8fafc' }}>
+                    <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>{label}</span>
+                    <span style={{ fontSize: 11, color: '#0f172a', fontWeight: 800 }}>{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Repair Cost Estimation */}
+          <div className="panel">
+            <div className="panel-header" style={{ borderBottom: '1px solid #f1f5f9' }}>
+              <div className="panel-title">💰 Repair Cost Estimate</div>
+            </div>
+            <div className="panel-body">
+              <div style={{ textAlign: 'center', marginBottom: 14 }}>
+                <div style={{ fontSize: 24, fontWeight: 900, color: '#0f172a' }}>₹{Math.round(totalCost)}K</div>
+                <div style={{ fontSize: 11, color: '#64748b' }}>Total estimated repair budget</div>
+              </div>
+              {[
+                { label: 'Critical zones', value: `₹${Math.round(critCost)}K`, color: '#dc2626' },
+                { label: 'Potholes (avg)', value: '₹45K each', color: '#ea580c' },
+                { label: 'Cracks (avg)', value: '₹18K each', color: '#ca8a04' },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid #f8fafc' }}>
+                  <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>{label}</span>
+                  <span style={{ fontSize: 11, color, fontWeight: 800 }}>{value}</span>
+                </div>
+              ))}
+              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 10, fontStyle: 'italic' }}>
+                * Estimates based on NRRDA norms. Actual costs may vary.
+              </div>
+            </div>
+          </div>
 
           {/* System Health */}
-          <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '20px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-              <IconActivity />
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>System Health</h3>
+          <div className="panel">
+            <div className="panel-header" style={{ borderBottom: '1px solid #f1f5f9' }}>
+              <div className="panel-title">⚡ System Health</div>
             </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {healthItems.map((item, i) => (
-                <div key={i}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 500, color: '#334155' }}>{item.label}</span>
-                    <span style={{ fontSize: 10, fontWeight: 800, color: item.color, letterSpacing: '0.07em' }}>{item.status}</span>
-                  </div>
-                  <div style={{ height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${barStyles[item.idx]}%`, background: barColors[item.idx], borderRadius: 3 }} />
-                  </div>
-                </div>
-              ))}
+            <div className="panel-body">
+              <SystemHealthRow label="AI Detection Engine" status="ONLINE" pct={100} color="#22c55e" />
+              <SystemHealthRow label="Satellite GEE Feed" status="ACTIVE" pct={88} color="#2563eb" />
+              <SystemHealthRow label="Database Sync" status="SYNCED" pct={100} color="#22c55e" />
+              <SystemHealthRow label="Storage Pool" status="72% USED" pct={72} color="#f97316" />
             </div>
           </div>
-
-          {/* Monthly Snapshot */}
-          <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '20px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <IconActivity />
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Monthly Snapshot</h3>
-            </div>
-            <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 16 }}>
-              Aggregate Trend (Feb – Mar)
-            </p>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 80 }}>
-              {[35, 55, 40, 70, 45, 80, 60, 50, 75, 65, 40, 55].map((h, i) => (
-                <div key={i} style={{ flex: 1, background: '#eff6ff', borderRadius: '2px 2px 0 0', position: 'relative', height: '100%' }}>
-                  <div style={{
-                    position: 'absolute', bottom: 0, left: 0, right: 0,
-                    height: `${h}%`,
-                    background: '#2563eb',
-                    borderRadius: '2px 2px 0 0',
-                  }} />
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
-              <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>Week 1</span>
-              <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>Today</span>
-            </div>
-          </div>
-
         </div>
       </div>
     </div>
   );
 }
 
-function StatCard({ icon, iconBg, label, sub, value }) {
-  return (
-    <div style={{
-      background: '#fff',
-      border: '1px solid #e2e8f0',
-      borderRadius: 10,
-      padding: '18px 20px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-      transition: 'box-shadow 0.2s',
-    }}>
-      {/* Icon */}
-      <div style={{
-        width: 42, height: 42,
-        background: iconBg,
-        borderRadius: 10,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        marginBottom: 14,
-      }}>
-        {icon}
-      </div>
-      {/* Number */}
-      <div style={{ fontSize: 32, fontWeight: 800, color: '#0f172a', lineHeight: 1, marginBottom: 6 }}>{value}</div>
-      {/* Label */}
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 3 }}>{label}</div>
-      {/* Subtitle */}
-      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>{sub}</div>
-    </div>
-  );
-}

@@ -1,76 +1,79 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { authFetch } from '@/utils/authFetch';
 
-const IconUpload = ({ size = 28, color = '#94a3b8' }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-    <polyline points="17 8 12 3 7 8"/>
-    <line x1="12" y1="3" x2="12" y2="15"/>
-  </svg>
-);
+const STATUS_INFO = {
+  pending: { label: 'Pending', color: '#64748b', bg: '#f1f5f9', icon: '⏳' },
+  processing: { label: 'Processing', color: '#2563eb', bg: '#eff6ff', icon: '🔄' },
+  completed: { label: 'Completed', color: '#16a34a', bg: '#f0fdf4', icon: '✅' },
+  failed: { label: 'Failed', color: '#dc2626', bg: '#fee2e2', icon: '❌' },
+};
 
-const IconInfo = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10"/>
-    <path d="M12 16v-4M12 8h.01"/>
-  </svg>
-);
+function StatusBadge({ status }) {
+  const info = STATUS_INFO[status] || STATUS_INFO.pending;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '3px 10px', borderRadius: 20,
+      background: info.bg, color: info.color,
+      fontSize: 12, fontWeight: 700,
+    }}>
+      {info.icon} {info.label}
+    </span>
+  );
+}
 
-const IconFile = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-    <polyline points="14 2 14 8 20 8"/>
-  </svg>
-);
-
-function DropZone({ label, required, accept, hint }) {
-  const inputRef = useRef(null);
+function DropZone({ label, required, accept, hint, onFile, file }) {
+  const ref = useRef(null);
   const [dragging, setDragging] = useState(false);
-  const [file, setFile] = useState(null);
 
   const handleDrop = (e) => {
     e.preventDefault();
     setDragging(false);
     const f = e.dataTransfer.files[0];
-    if (f) setFile(f);
+    if (f) onFile(f);
   };
 
   return (
     <div>
       {label && (
-        <p style={{ fontSize: 11, fontWeight: 700, color: '#334155', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6, letterSpacing: '0.02em' }}>
           {label} {required && <span style={{ color: '#ef4444' }}>*</span>}
-        </p>
+        </label>
       )}
       <div
-        onClick={() => inputRef.current?.click()}
+        onClick={() => ref.current?.click()}
         onDragOver={e => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
         style={{
-          border: `1.5px dashed ${dragging ? '#2563eb' : '#cbd5e1'}`,
+          border: `2px dashed ${dragging ? '#2563eb' : file ? '#22c55e' : '#cbd5e1'}`,
           borderRadius: 10,
-          background: dragging ? '#eff6ff' : '#f8fafc',
-          padding: '32px 20px',
+          background: dragging ? '#eff6ff' : file ? '#f0fdf4' : '#f8fafc',
+          padding: '24px 20px',
           textAlign: 'center',
           cursor: 'pointer',
           transition: 'all 0.2s',
         }}
       >
-        <input ref={inputRef} type="file" accept={accept} style={{ display: 'none' }} onChange={e => setFile(e.target.files[0])} />
+        <input ref={ref} type="file" accept={accept} style={{ display: 'none' }} onChange={e => onFile(e.target.files[0])} />
         {file ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, color: '#2563eb' }}>
-            <IconFile />
-            <span style={{ fontSize: 13, fontWeight: 600 }}>{file.name}</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+            <span style={{ fontSize: 20 }}>📄</span>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#15803d' }}>{file.name}</div>
+              <div style={{ fontSize: 11, color: '#64748b' }}>{(file.size / 1024 / 1024).toFixed(2)} MB</div>
+            </div>
+            <span style={{ marginLeft: 8, color: '#22c55e', fontSize: 16 }}>✓</span>
           </div>
         ) : (
           <>
-            <div style={{ marginBottom: 10, display: 'flex', justifyContent: 'center' }}>
-              <IconUpload color={dragging ? '#2563eb' : '#94a3b8'} />
+            <div style={{ fontSize: 28, marginBottom: 8 }}>{dragging ? '📥' : '📤'}</div>
+            <div style={{ fontSize: 13, color: '#64748b', fontWeight: 500, marginBottom: 3 }}>
+              {dragging ? 'Drop file here' : 'Click to browse or drag & drop'}
             </div>
-            <p style={{ fontSize: 13, color: '#64748b', fontWeight: 500, marginBottom: 4 }}>Drop file here or click to browse</p>
-            {hint && <p style={{ fontSize: 11, color: '#94a3b8' }}>{hint}</p>}
+            {hint && <div style={{ fontSize: 11, color: '#94a3b8' }}>{hint}</div>}
           </>
         )}
       </div>
@@ -79,142 +82,315 @@ function DropZone({ label, required, accept, hint }) {
 }
 
 export default function UploadPage() {
-  const [submitting, setSubmitting] = useState(false);
+  const [videoFile, setVideoFile] = useState(null);
+  const [gpsFile, setGpsFile] = useState(null);
+  const [accelFile, setAccelFile] = useState(null);
+  const [progress, setProgress] = useState(0);
+  const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
+  const [uploads, setUploads] = useState([]);
+  const [loadingList, setLoadingList] = useState(false);
+
+  const loadUploads = useCallback(async () => {
+    setLoadingList(true);
+    try {
+      const res = await authFetch('/api/upload/video');
+      const data = await res.json();
+      setUploads(data.data || []);
+    } catch { setUploads([]); }
+    finally { setLoadingList(false); }
+  }, []);
+
+  useEffect(() => { loadUploads(); }, [loadUploads]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
-    await new Promise(r => setTimeout(r, 1500));
-    setResult({ success: true, message: 'Files uploaded successfully. AI processing started.' });
-    setSubmitting(false);
+    if (!videoFile) return;
+    setUploading(true);
+    setProgress(0);
+    setResult(null);
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('rdd_token') : null;
+    const formData = new FormData();
+    formData.append('video', videoFile);
+    if (gpsFile) formData.append('gps', gpsFile);
+    if (accelFile) formData.append('accelerometer', accelFile);
+
+    // Use XHR for upload progress
+    const xhr = new XMLHttpRequest();
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
+    });
+
+    xhr.addEventListener('load', () => {
+      setUploading(false);
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setResult({ success: true, message: `✅ Upload successful! Video ID: ${data.video_id}. AI processing started.`, data });
+          setVideoFile(null); setGpsFile(null); setAccelFile(null);
+          setTimeout(loadUploads, 1000);
+        } else {
+          setResult({ success: false, message: `❌ Upload failed: ${data.error || 'Unknown error'}` });
+        }
+      } catch {
+        setResult({ success: false, message: '❌ Upload failed: Invalid server response.' });
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      setUploading(false);
+      setResult({ success: false, message: '❌ Network error. Check your connection and try again.' });
+    });
+
+    xhr.open('POST', '/api/upload/video');
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.send(formData);
+  };
+
+  const handleCluster = async (videoId) => {
+    try {
+      const res = await authFetch('/api/v1/clusters', {
+        method: 'POST',
+        body: JSON.stringify({ video_id: videoId, force_recluster: true }),
+      });
+      if (res.ok) {
+        setResult({ success: true, message: `🔄 Clustering triggered for video ${videoId}. Check Damage Map for results.` });
+      } else {
+        setResult({ success: false, message: '⚠️ Could not trigger clustering. ML service may be offline.' });
+      }
+    } catch {
+      setResult({ success: false, message: '❌ Network error triggering clustering.' });
+    }
+    setTimeout(() => setResult(null), 4000);
   };
 
   return (
-    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", maxWidth: 860, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1100, margin: '0 auto' }} className="fade-in">
 
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
-        <p style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 }}>
-          Data Ingestion Module
-        </p>
-        <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.15, marginBottom: 6 }}>
-          Upload Survey Data
-        </h1>
-        <p style={{ fontSize: 13, color: '#64748b', fontWeight: 400 }}>
-          Submit dashcam footage and sensor logs for AI processing and cluster analysis.
-        </p>
+        <p className="page-eyebrow">Data Ingestion</p>
+        <h1 className="page-title">Upload Survey Data</h1>
+        <p className="page-subtitle">Submit dashcam footage and sensor logs for AI detection and cluster analysis.</p>
       </div>
 
-      {/* Info Banner */}
-      <div style={{
-        display: 'flex', alignItems: 'flex-start', gap: 12,
-        background: '#eff6ff',
-        border: '1px solid #bfdbfe',
-        borderRadius: 10,
-        padding: '14px 18px',
-        marginBottom: 24,
-      }}>
-        <div style={{ marginTop: 1 }}><IconInfo /></div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24 }}>
+
+        {/* Upload Form */}
         <div>
-          <p style={{ fontSize: 13, fontWeight: 600, color: '#1d4ed8', marginBottom: 3 }}>Processing Pipeline</p>
-          <p style={{ fontSize: 12, color: '#3b82f6', lineHeight: 1.6 }}>
-            After upload, the AI engine will automatically extract road damage detections, apply DBSCAN clustering, and calculate risk scores within minutes.
-          </p>
+          {/* Info Banner */}
+          <div className="alert alert-info" style={{ marginBottom: 20 }}>
+            <span style={{ fontSize: 20 }}>ℹ️</span>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>Automated Processing Pipeline</div>
+              <div style={{ fontSize: 12, lineHeight: 1.55 }}>
+                After upload, the AI engine extracts detections, applies DBSCAN clustering, and calculates risk scores automatically within minutes.
+              </div>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit}>
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title">📹 Survey File Submission</div>
+                  <div className="panel-subtitle">Upload dashcam video with optional GPS and sensor data</div>
+                </div>
+              </div>
+              <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+                <DropZone
+                  label="Dashcam Video File"
+                  required
+                  accept="video/mp4,video/avi,.mov,.mp4"
+                  hint="MP4, AVI, MOV — max 500MB"
+                  file={videoFile}
+                  onFile={setVideoFile}
+                />
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <DropZone
+                    label="GPS Trace File (Optional)"
+                    accept=".csv,.json"
+                    hint="CSV/JSON with lat, lon columns"
+                    file={gpsFile}
+                    onFile={setGpsFile}
+                  />
+                  <DropZone
+                    label="Accelerometer Data (Optional)"
+                    accept=".csv,.json"
+                    hint="CSV/JSON with x, y, z readings"
+                    file={accelFile}
+                    onFile={setAccelFile}
+                  />
+                </div>
+
+                {/* Progress Bar */}
+                {uploading && (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>Uploading...</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb' }}>{progress}%</span>
+                    </div>
+                    <div className="progress-track" style={{ height: 8 }}>
+                      <div className="progress-fill" style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #2563eb, #7c3aed)' }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Result */}
+                {result && (
+                  <div className={`alert ${result.success ? 'alert-success' : 'alert-danger'}`}>
+                    <span>{result.message}</span>
+                  </div>
+                )}
+
+                {/* Submit */}
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    type="submit"
+                    disabled={uploading || !videoFile}
+                    className="btn btn-primary"
+                    style={{
+                      opacity: !videoFile ? 0.5 : 1,
+                      cursor: !videoFile || uploading ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {uploading ? <><span className="spin" style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%' }} /> Uploading...</> : '📤 Upload & Process'}
+                  </button>
+                  {!uploading && videoFile && (
+                    <button
+                      type="button"
+                      onClick={() => { setVideoFile(null); setGpsFile(null); setAccelFile(null); setResult(null); }}
+                      className="btn btn-secondary"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        {/* Processing Tips */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="panel">
+            <div className="panel-header">
+              <div className="panel-title">💡 Best Practices</div>
+            </div>
+            <div className="panel-body">
+              {[
+                { icon: '🎥', title: 'Video Quality', desc: 'Use at least 480p resolution. Higher quality = better AI detection accuracy.' },
+                { icon: '📍', title: 'GPS Data', desc: 'Include a GPS trace CSV with lat, lon columns for precise damage mapping.' },
+                { icon: '📐', title: 'Accelerometer', desc: 'IMU data (x, y, z) helps correlate vibrations with road damage severity.' },
+                { icon: '⚡', title: 'Auto-Processing', desc: 'Clustering and risk scoring starts automatically after upload completes.' },
+              ].map(({ icon, title, desc }, i) => (
+                <div key={i} style={{ display: 'flex', gap: 12, marginBottom: i < 3 ? 16 : 0 }}>
+                  <div style={{ fontSize: 20, flexShrink: 0, marginTop: 2 }}>{icon}</div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>{title}</div>
+                    <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.5 }}>{desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-header">
+              <div className="panel-title">📊 Supported Formats</div>
+            </div>
+            <div className="panel-body">
+              {[
+                { type: 'Video', formats: 'MP4, AVI, MOV', size: 'Max 500MB' },
+                { type: 'GPS', formats: 'CSV, JSON', size: 'lat, lon columns' },
+                { type: 'IMU', formats: 'CSV, JSON', size: 'x, y, z columns' },
+              ].map(({ type, formats, size }, i) => (
+                <div key={i} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '9px 0', borderBottom: i < 2 ? '1px solid #f1f5f9' : 'none',
+                }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>{type}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{size}</div>
+                  </div>
+                  <span style={{ fontSize: 11, color: '#2563eb', fontWeight: 600 }}>{formats}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Upload Form */}
-      <form onSubmit={handleSubmit}>
-        <div style={{
-          background: '#fff',
-          border: '1px solid #e2e8f0',
-          borderRadius: 12,
-          padding: '24px 28px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-        }}>
-          {/* Section Title */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24, paddingBottom: 14, borderBottom: '1px solid #f1f5f9' }}>
-            <IconFile />
-            <h2 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Survey File Submission</h2>
+      {/* Upload History */}
+      <div className="panel" style={{ marginTop: 24 }}>
+        <div className="panel-header">
+          <div>
+            <div className="panel-title">📋 Upload History</div>
+            <div className="panel-subtitle">Recent survey data submissions and processing status</div>
           </div>
-
-          {/* Video Upload — Full Width */}
-          <div style={{ marginBottom: 24 }}>
-            <DropZone
-              label="Dashcam Video File"
-              required
-              accept="video/mp4,video/avi,.mov"
-              hint="MP4, AVI, MOV — max 500MB"
-            />
-          </div>
-
-          {/* GPS + Accelerometer — Side by Side */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
-            <DropZone
-              label="GPS Trace File (Optional)"
-              accept=".csv,.json"
-              hint="CSV or JSON with lat/lon columns"
-            />
-            <DropZone
-              label="Accelerometer Data (Optional)"
-              accept=".csv,.json"
-              hint="CSV or JSON with IMU readings"
-            />
-          </div>
-
-          {/* Result Message */}
-          {result && (
-            <div style={{
-              background: result.success ? '#f0fdf4' : '#fef2f2',
-              border: `1px solid ${result.success ? '#bbf7d0' : '#fca5a5'}`,
-              borderRadius: 8,
-              padding: '12px 16px',
-              fontSize: 13,
-              fontWeight: 600,
-              color: result.success ? '#15803d' : '#dc2626',
-              marginBottom: 16,
-            }}>
-              {result.message}
-            </div>
-          )}
-
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={submitting}
-            style={{
-              background: submitting ? '#93c5fd' : '#2563eb',
-              color: 'white',
-              border: 'none',
-              borderRadius: 8,
-              padding: '11px 28px',
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: submitting ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              transition: 'background 0.2s',
-              boxShadow: '0 2px 8px rgba(37,99,235,0.25)',
-            }}
-          >
-            {submitting ? (
-              <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-                  <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-                </svg>
-                Uploading...
-              </>
-            ) : (
-              <>
-                <IconUpload size={16} color="white" />
-                Submit for AI Processing
-              </>
-            )}
-          </button>
+          <button onClick={loadUploads} className="btn btn-secondary btn-sm">🔄 Refresh</button>
         </div>
-      </form>
+
+        {loadingList ? (
+          <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>Loading upload history...</div>
+        ) : uploads.length === 0 ? (
+          <div style={{ padding: '56px', textAlign: 'center' }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>📭</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>No Uploads Yet</div>
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Upload your first survey footage above to get started.</div>
+          </div>
+        ) : (
+          <div className="table-container" style={{ border: 'none', borderRadius: 0 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Video ID</th>
+                  <th>File Name</th>
+                  <th>File Size</th>
+                  <th>GPS Points</th>
+                  <th>Detections</th>
+                  <th>Status</th>
+                  <th>Uploaded</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploads.map((u, i) => (
+                  <tr key={i}>
+                    <td style={{ fontFamily: 'monospace', fontSize: 11, color: '#64748b' }}>{u.video_id}</td>
+                    <td style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {u.original_filename || '—'}
+                    </td>
+                    <td style={{ fontSize: 12, color: '#64748b' }}>
+                      {u.file_size ? `${(u.file_size / 1024 / 1024).toFixed(1)} MB` : '—'}
+                    </td>
+                    <td style={{ fontSize: 12, color: '#64748b' }}>{u.gps_data?.length || 0}</td>
+                    <td style={{ fontSize: 12, color: '#64748b' }}>{u.processing_result?.detections_count || 0}</td>
+                    <td><StatusBadge status={u.status} /></td>
+                    <td style={{ fontSize: 11, color: '#94a3b8' }}>
+                      {u.created_at ? new Date(u.created_at).toLocaleString() : '—'}
+                    </td>
+                    <td>
+                      {u.status === 'completed' && (
+                        <button
+                          onClick={() => handleCluster(u.video_id)}
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: 11 }}
+                        >
+                          Re-cluster
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

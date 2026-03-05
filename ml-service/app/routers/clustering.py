@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from app.schemas import ClusteringRequest, ClusteringResponse
 from app.services.clustering_service import run_clustering
+from app.services.aggregation_service import run_aggregation
 
 router = APIRouter()
 
@@ -23,6 +24,10 @@ async def trigger_clustering(request: ClusteringRequest):
             min_samples=request.min_samples
         )
         
+        # Trigger aggregation asynchronously after clustering connects everything
+        import asyncio
+        asyncio.create_task(run_aggregation())
+        
         return ClusteringResponse(
             status=result["status"],
             clusters_created=result["clusters_created"],
@@ -31,5 +36,18 @@ async def trigger_clustering(request: ClusteringRequest):
             pothole_summary=result.get("pothole_summary", [])
         )
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/aggregate")
+async def trigger_aggregation():
+    """
+    Manually trigger spatial aggregation to build/update areas and roads collections.
+    This groups current un-repaired clusters into heatmaps and road segments.
+    """
+    try:
+        result = await run_aggregation()
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

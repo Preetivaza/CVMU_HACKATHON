@@ -1,247 +1,315 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { authFetch } from '@/utils/authFetch';
 
-// --- Inline SVG Icons ---
-const IconBarChart = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
-    <line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/>
-  </svg>
-);
-const IconTriangle = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
-    <path d="M12 9v4M12 17h.01"/>
-  </svg>
-);
-const IconTrend = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
-    <polyline points="16 7 22 7 22 13"/>
-  </svg>
-);
-const IconGauge = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-    <path d="m9 11 3 3L22 4"/>
-  </svg>
-);
+const RISK_COLORS = { Critical: '#dc2626', High: '#ea580c', Medium: '#ca8a04', Low: '#16a34a' };
+const RISK_BG = { Critical: '#fee2e2', High: '#fff7ed', Medium: '#fefce8', Low: '#f0fdf4' };
 
-function StatCard({ icon, iconBg, value, label }) {
-  return (
-    <div style={{
-      background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-      padding: '20px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-    }}>
-      <div style={{
-        width: 44, height: 44, background: iconBg, borderRadius: 10,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        marginBottom: 16,
-      }}>
-        {icon}
-      </div>
-      <div style={{ fontSize: 34, fontWeight: 800, color: '#0f172a', lineHeight: 1, marginBottom: 6 }}>{value}</div>
-      <div style={{ fontSize: 13, fontWeight: 500, color: '#64748b' }}>{label}</div>
-    </div>
-  );
-}
-
-function getLevelStyle(level) {
-  if (!level) return { bg: '#f1f5f9', color: '#64748b' };
-  const l = level.toLowerCase();
-  if (l === 'critical') return { bg: '#fee2e2', color: '#dc2626' };
-  if (l === 'high')     return { bg: '#fff7ed', color: '#ea580c' };
-  if (l === 'medium')   return { bg: '#fefce8', color: '#ca8a04' };
-  return { bg: '#f0fdf4', color: '#16a34a' };
+function downloadCSV(rows, filename) {
+  if (!rows || rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.join(','),
+    ...rows.map(row => headers.map(h => JSON.stringify(row[h] ?? '')).join(',')),
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function AnalyticsPage() {
-  const [stats, setStats] = useState({ totalReviewed: 0, critical: 0, highRisk: 0, avgScore: 0 });
   const [ranking, setRanking] = useState([]);
   const [trend, setTrend] = useState([]);
+  const [stats, setStats] = useState({ total: 0, critical: 0, high: 0, avgScore: 0 });
   const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState('risk_score');
+  const [sortDir, setSortDir] = useState('desc');
 
-  useEffect(() => {
-    // Fetch priority ranking
-    fetch('/api/v1/analytics/priority-ranking?limit=10')
-      .then(r => r.json())
-      .then(data => {
-        if (data.ranking) {
-          const r = data.ranking;
-          setRanking(r);
-          const criticalCount = r.filter(c => (c.risk_level || '').toLowerCase() === 'critical').length;
-          const highCount     = r.filter(c => (c.risk_level || '').toLowerCase() === 'high').length;
-          const avgScore      = r.length > 0 ? Math.round(r.reduce((s, c) => s + c.risk_score, 0) / r.length) : 0;
-          setStats({ totalReviewed: r.length, critical: criticalCount, highRisk: highCount, avgScore });
-        }
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [rankRes, trendRes] = await Promise.all([
+        authFetch('/api/v1/analytics/priority-ranking?limit=20').then(r => r.json()).catch(() => ({})),
+        authFetch('/api/v1/analytics/monthly-trend').then(r => r.json()).catch(() => ({})),
+      ]);
 
-    // Fetch monthly trend
-    fetch('/api/v1/analytics/monthly-trend')
-      .then(r => r.json())
-      .then(data => { if (data.trend) setTrend(data.trend); })
-      .catch(() => {});
+      const r = rankRes.ranking || [];
+      setRanking(r);
+      const totalScore = r.reduce((s, c) => s + (c.risk_score || 0), 0);
+      setStats({
+        total: r.length,
+        critical: r.filter(c => (c.risk_level || '').toLowerCase() === 'critical').length,
+        high: r.filter(c => (c.risk_level || '').toLowerCase() === 'high').length,
+        avgScore: r.length > 0 ? Math.round(totalScore / r.length) : 0,
+      });
+      setTrend(trendRes.trend || []);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const maxTrendVal = trend.length > 0 ? Math.max(...trend.map(t => t.count || 0), 1) : 1;
+  useEffect(() => { load(); }, [load]);
+
+  const sorted = [...ranking].sort((a, b) => {
+    const dir = sortDir === 'desc' ? -1 : 1;
+    if (sortBy === 'risk_score') return dir * ((a.risk_score || 0) - (b.risk_score || 0));
+    if (sortBy === 'risk_level') return dir * (a.risk_level || '').localeCompare(b.risk_level || '');
+    return 0;
+  });
+
+  const toggleSort = (col) => {
+    if (sortBy === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+    else { setSortBy(col); setSortDir('desc'); }
+  };
+
+  const maxTrend = Math.max(...trend.map(t => t.count || 0), 1);
+
+  // Damage type breakdown from ranking
+  const damageMap = {};
+  ranking.forEach(c => {
+    if (c.damage_types) {
+      Object.keys(c.damage_types).forEach(t => {
+        damageMap[t] = (damageMap[t] || 0) + 1;
+      });
+    }
+  });
+  const damageEntries = Object.entries(damageMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const maxDmg = Math.max(...damageEntries.map(e => e[1]), 1);
+
+  const handleExport = () => {
+    const rows = sorted.map((c, i) => ({
+      rank: i + 1,
+      lat: c.location?.coordinates?.[1]?.toFixed(6) || '',
+      lon: c.location?.coordinates?.[0]?.toFixed(6) || '',
+      risk_score: Math.round(c.risk_score || 0),
+      risk_level: c.risk_level || '',
+      damage_types: c.damage_types ? Object.keys(c.damage_types).join(';') : '',
+      status: c.status || 'pending',
+    }));
+    downloadCSV(rows, `sadaksurksha-priority-ranking-${new Date().toISOString().split('T')[0]}.csv`);
+  };
 
   return (
-    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", maxWidth: 1280, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1280, margin: '0 auto' }} className="fade-in">
 
-      {/* ---- Page Header ---- */}
-      <div style={{ marginBottom: 28 }}>
-        <p style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 }}>
-          Analytics &amp; Reporting
-        </p>
-        <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.15, marginBottom: 6 }}>
-          Infrastructure Analytics Report
-        </h1>
-        <p style={{ fontSize: 13, color: '#64748b', fontWeight: 400 }}>
-          Statistical analysis of road damage patterns and repair efficiency.
-        </p>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 }}>
+        <div>
+          <p className="page-eyebrow">Analysis & Reporting</p>
+          <h1 className="page-title">Infrastructure Analytics</h1>
+          <p className="page-subtitle">Statistical analysis of road damage patterns, risk distribution, and repair performance.</p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          <button onClick={load} className="btn btn-secondary btn-sm">🔄 Refresh</button>
+          <button onClick={handleExport} className="btn btn-primary btn-sm">⬇ Export CSV</button>
+        </div>
       </div>
 
-      {/* ---- Stat Cards ---- */}
+      {/* Stat Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
-        <StatCard icon={<IconBarChart />} iconBg="#eff6ff" value={stats.totalReviewed} label="Total Reviewed" />
-        <StatCard icon={<IconTriangle />} iconBg="#fef2f2" value={stats.critical}      label="Critical Alerts" />
-        <StatCard icon={<IconTrend />}    iconBg="#fffbeb" value={stats.highRisk}       label="High Risk" />
-        <StatCard icon={<IconGauge />}    iconBg="#f0fdf4" value={stats.avgScore}       label="Avg Risk Score" />
+        {[
+          { icon: '🗂️', bg: '#eff6ff', label: 'Total Analysed', value: stats.total, sub: 'Clusters in ranking' },
+          { icon: '🚨', bg: '#fee2e2', label: 'Critical', value: stats.critical, sub: 'Immediate action' },
+          { icon: '⚠️', bg: '#fff7ed', label: 'High Risk', value: stats.high, sub: 'Priority repair' },
+          { icon: '📊', bg: '#f0fdf4', label: 'Avg Risk Score', value: stats.avgScore, sub: 'Out of 100' },
+        ].map(({ icon, bg, label, value, sub }, i) => (
+          <div key={i} className="stat-card">
+            <div style={{ width: 44, height: 44, background: bg, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, marginBottom: 14 }}>{icon}</div>
+            <div className="stat-value">{value}</div>
+            <div className="stat-label">{label}</div>
+            <div className="stat-sub">{sub}</div>
+          </div>
+        ))}
       </div>
 
-      {/* ---- Two-Column Layout ---- */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 420px', gap: 20 }}>
+      {/* Charts Row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20, marginBottom: 24 }}>
 
-        {/* Monthly Detection Trend */}
-        <div style={{
-          background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12,
-          padding: '22px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-        }}>
-          <h2 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Monthly Detection Trend</h2>
-          <p style={{ fontSize: 12, color: '#94a3b8', fontWeight: 400, marginBottom: 24 }}>
-            Total detections per month (last 6 months)
-          </p>
-
-          {trend.length > 0 ? (
+        {/* Monthly Trend Chart */}
+        <div className="panel">
+          <div className="panel-header">
             <div>
-              {/* Bar Chart */}
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 140, marginBottom: 12 }}>
-                {trend.map((t, i) => (
-                  <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: '#334155', marginBottom: 4 }}>{t.count}</div>
-                    <div style={{
-                      width: '100%',
-                      height: `${Math.max((t.count / maxTrendVal) * 120, 4)}px`,
-                      background: '#2563eb',
-                      borderRadius: '3px 3px 0 0',
-                    }} />
-                  </div>
-                ))}
-              </div>
-              {/* X-axis labels */}
-              <div style={{ display: 'flex', gap: 10 }}>
-                {trend.map((t, i) => (
-                  <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>
-                    {t.month || `M${i+1}`}
-                  </div>
-                ))}
-              </div>
+              <div className="panel-title">📈 Monthly Detection Trend</div>
+              <div className="panel-subtitle">Total road damage detections per month</div>
             </div>
-          ) : (
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              height: 160, color: '#94a3b8', fontSize: 13, fontWeight: 500,
-              textAlign: 'center',
-            }}>
-              No monthly data available. Run clustering after uploading videos.
-            </div>
-          )}
-        </div>
-
-        {/* Priority Ranking Table */}
-        <div style={{
-          background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12,
-          padding: '22px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-          overflow: 'hidden',
-        }}>
-          <h2 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>Priority Ranking</h2>
-          <p style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400, marginBottom: 20 }}>
-            Top risk clusters by score
-          </p>
-
-          {/* Table Header */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '28px 1.6fr 0.8fr 0.7fr 0.9fr',
-            borderBottom: '1px solid #f1f5f9',
-            paddingBottom: 10, marginBottom: 6,
-          }}>
-            {['#', 'COORDS', 'TYPE', 'SCORE', 'LEVEL'].map(h => (
-              <div key={h} style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', letterSpacing: '0.08em' }}>{h}</div>
-            ))}
           </div>
-
-          {/* Table Rows */}
-          {ranking.length > 0 ? ranking.slice(0, 8).map((c, i) => {
-            const lvl = getLevelStyle(c.risk_level);
-            return (
-              <div key={i} style={{
-                display: 'grid',
-                gridTemplateColumns: '28px 1.6fr 0.8fr 0.7fr 0.9fr',
-                alignItems: 'center',
-                padding: '12px 0',
-                borderBottom: i < Math.min(ranking.length, 8) - 1 ? '1px solid #f8fafc' : 'none',
-              }}>
-                {/* Rank Badge */}
-                <div style={{
-                  width: 20, height: 20, borderRadius: '50%',
-                  background: '#eff6ff', color: '#2563eb',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10, fontWeight: 800,
-                }}>
-                  {i + 1}
+          <div className="panel-body">
+            {trend.length > 0 ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 140, marginBottom: 12 }}>
+                  {trend.map((t, i) => (
+                    <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#334155', marginBottom: 5 }}>{t.count || 0}</div>
+                      <div
+                        style={{
+                          width: '100%', borderRadius: '4px 4px 0 0',
+                          height: `${Math.max(((t.count || 0) / maxTrend) * 110, 4)}px`,
+                          background: i === trend.length - 1
+                            ? 'linear-gradient(180deg, #3b82f6, #1d4ed8)'
+                            : 'linear-gradient(180deg, #93c5fd, #bfdbfe)',
+                          transition: 'height 0.4s ease',
+                        }}
+                      />
+                    </div>
+                  ))}
                 </div>
-
-                {/* Coordinates */}
-                <div style={{ fontSize: 11.5, color: '#334155', fontWeight: 500, fontFamily: 'monospace' }}>
-                  {c.location?.coordinates
-                    ? `${c.location.coordinates[1].toFixed(4)}, ${c.location.coordinates[0].toFixed(4)}`
-                    : '—'}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {trend.map((t, i) => (
+                    <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 10, color: '#94a3b8', fontWeight: 700 }}>
+                      {t.month ? String(t.month).slice(-3) : `M${i + 1}`}
+                    </div>
+                  ))}
                 </div>
-
-                {/* Type */}
-                <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>
-                  {c.damage_types ? (Object.keys(c.damage_types).length > 1 ? 'Various' : Object.keys(c.damage_types)[0]) : 'Various'}
-                </div>
-
-                {/* Score */}
-                <div style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>
-                  {Math.round(c.risk_score)}
-                </div>
-
-                {/* Level Badge */}
-                <div>
-                  <span style={{
-                    fontSize: 9.5, fontWeight: 800, letterSpacing: '0.07em',
-                    textTransform: 'uppercase',
-                    background: lvl.bg, color: lvl.color,
-                    border: `1px solid ${lvl.bg}`,
-                    borderRadius: 4, padding: '3px 7px',
-                  }}>
-                    {c.risk_level || 'Low'}
-                  </span>
-                </div>
+              </>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8', fontSize: 13 }}>
+                No monthly data yet. Upload survey footage to begin analysis.
               </div>
-            );
-          }) : (
-            <div style={{ padding: '32px 0', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
-              No cluster data found. Upload survey footage to begin analysis.
-            </div>
-          )}
+            )}
+          </div>
         </div>
+
+        {/* Damage Type Breakdown */}
+        <div className="panel">
+          <div className="panel-header">
+            <div className="panel-title">🔍 Damage Type Breakdown</div>
+          </div>
+          <div className="panel-body">
+            {damageEntries.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {damageEntries.map(([type, count], i) => {
+                  const pct = Math.round((count / ranking.length) * 100);
+                  const colors = ['#2563eb', '#ea580c', '#dc2626', '#7c3aed', '#0284c7'];
+                  return (
+                    <div key={i}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#334155', textTransform: 'capitalize' }}>{type}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>{count} ({pct}%)</span>
+                      </div>
+                      <div className="progress-track">
+                        <div className="progress-fill" style={{ width: `${(count / maxDmg) * 100}%`, background: colors[i % colors.length] }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8', fontSize: 13 }}>
+                Upload videos to see damage breakdown.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Priority Table */}
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <div className="panel-title">🏆 Priority Ranking Table</div>
+            <div className="panel-subtitle">Click column headers to sort | {sorted.length} clusters</div>
+          </div>
+        </div>
+        {loading ? (
+          <div style={{ padding: '56px', textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>Loading data...</div>
+        ) : sorted.length > 0 ? (
+          <div className="table-container" style={{ border: 'none', borderRadius: 0 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Coordinates</th>
+                  <th>Damage Types</th>
+                  <th
+                    onClick={() => toggleSort('risk_score')}
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                  >
+                    Risk Score {sortBy === 'risk_score' ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
+                  </th>
+                  <th
+                    onClick={() => toggleSort('risk_level')}
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                  >
+                    Risk Level {sortBy === 'risk_level' ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
+                  </th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((c, i) => {
+                  const level = c.risk_level || 'Low';
+                  const status = c.status || 'pending';
+                  const statusColors = { pending: '#f97316', in_progress: '#2563eb', repaired: '#16a34a' };
+                  return (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 800, color: '#2563eb' }}>
+                        <div style={{
+                          width: 22, height: 22, borderRadius: '50%',
+                          background: i < 3 ? '#eff6ff' : '#f8fafc',
+                          color: i < 3 ? '#2563eb' : '#94a3b8',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 11, fontWeight: 800,
+                        }}>
+                          {i + 1}
+                        </div>
+                      </td>
+                      <td>
+                        <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#64748b' }}>
+                          {c.location?.coordinates
+                            ? `${c.location.coordinates[1].toFixed(4)}, ${c.location.coordinates[0].toFixed(4)}`
+                            : '—'}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0f172a' }}>
+                          {c.damage_types
+                            ? Object.keys(c.damage_types).slice(0, 2).map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ')
+                            : 'Various'}
+                        </span>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 56, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${Math.min(c.risk_score || 0, 100)}%`, background: RISK_COLORS[level] || '#ef4444', borderRadius: 3 }} />
+                          </div>
+                          <span style={{ fontWeight: 800, fontSize: 14, color: '#0f172a' }}>{Math.round(c.risk_score || 0)}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+                          fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase',
+                          background: RISK_BG[level] || '#f1f5f9', color: RISK_COLORS[level] || '#64748b',
+                        }}>
+                          {level}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
+                          color: statusColors[status] || '#64748b',
+                        }}>
+                          ● {status.replace('_', ' ')}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ padding: '56px', textAlign: 'center' }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>No Analytics Data</div>
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Upload and process survey footage to generate analytics.</div>
+          </div>
+        )}
       </div>
     </div>
   );

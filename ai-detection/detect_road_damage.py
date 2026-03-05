@@ -11,16 +11,28 @@ from road_simulator import RoadSimulator
 # Configuration
 # ==========================================
 
+import argparse
+
+parser = argparse.ArgumentParser(description='Run Road Damage Detection')
+parser.add_argument('--video', type=str, default="test_data/test3_clear.mp4", help='Path to video file')
+parser.add_argument('--api_url', type=str, default="http://localhost:3000/api/v1/detections/bulk", help='Next.js API URL')
+parser.add_argument('--export', action='store_true', help='Export detections to API')
+parser.add_argument('--video_id', type=str, default=None, help='Video ID for the API')
+parser.add_argument('--internal_key', type=str, default=None, help='Internal API key for service-to-service auth')
+args, unknown = parser.parse_known_args()
+
 MODEL_PATH = "yolov12s.pt"
-VIDEO_PATH = "test_data/test3_clear.mp4"  # Replace with your dashcam video file path
-NEXTJS_API_URL = "http://localhost:3000/api/v1/detections/bulk"
-EXPORT_TO_API = False  # Set to True to send to the backend directly
+VIDEO_PATH = args.video
+NEXTJS_API_URL = args.api_url
+EXPORT_TO_API = args.export
+INTERNAL_KEY = args.internal_key
 
 ROADS_JSON_PATH = "roads.json"  # Ahmedabad road data
 
 video_filename = os.path.basename(VIDEO_PATH)
 video_basename, _ = os.path.splitext(video_filename)
 JSON_OUTPUT_PATH = f"{video_basename}_damage_report.json"
+VIDEO_ID = args.video_id if args.video_id else f"upload_{video_basename}"
 MODEL_VERSION = "yolov12s"
 
 # 0.45 is a good balance: filters noise but catches real damage
@@ -232,7 +244,7 @@ def main():
     print(f"After reduction: {len(best_per_second)} detections (1 best per damaged second)")
 
     # ── Build GeoJSON output (matches ML-Service DetectionsBulkRequest) ──
-    video_id = f"upload_{video_basename}"
+    video_id = VIDEO_ID
     all_detections = []
     for det in best_per_second:
         feature = {
@@ -292,9 +304,12 @@ def main():
     if EXPORT_TO_API:
         try:
             print(f"\nUploading to {NEXTJS_API_URL}...")
-            response = requests.post(NEXTJS_API_URL, json=final_payload)
+            headers = {'Content-Type': 'application/json'}
+            if INTERNAL_KEY:
+                headers['Authorization'] = f"Bearer {INTERNAL_KEY}"
+            response = requests.post(NEXTJS_API_URL, json=final_payload, headers=headers)
             if response.status_code in (200, 201):
-                print("Uploaded successfully!")
+                print(f"Uploaded successfully! {response.json().get('inserted_count', 0)} detections stored.")
             else:
                 print(f"Failed to upload. Status code: {response.status_code}, Response: {response.text}")
         except Exception as e:
