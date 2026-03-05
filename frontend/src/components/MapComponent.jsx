@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Circle, LayerGroup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Circle, LayerGroup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -19,6 +19,82 @@ const RISK_COLORS = {
   Medium: { stroke: '#eab308', fill: '#eab308', text: '#ca8a04', bg: '#fefce8', glow: '0 0 10px rgba(234,179,8,0.6)' },
   Low: { stroke: '#22c55e', fill: '#22c55e', text: '#16a34a', bg: '#f0fdf4', glow: '0 0 10px rgba(34,197,94,0.5)' },
 };
+
+const DAMAGE_COLORS = {
+  pothole: '#ef4444',
+  crack: '#f97316',
+  patch: '#3b82f6',
+  depression: '#a855f7',
+  other: '#6b7280',
+};
+
+function createDamageIcon(damageType) {
+  const color = DAMAGE_COLORS[damageType] || DAMAGE_COLORS.other;
+  const html = `
+    <div style="width:12px;height:12px;border-radius:50%;background:${color};
+      border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>
+  `;
+  return L.divIcon({ html, className: '', iconSize: [12, 12], iconAnchor: [6, 6] });
+}
+
+// Quick approx distance in meters
+function getDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function buildColoredSegments(routePoints, origDetections) {
+  const segments = [];
+  for (let i = 0; i < routePoints.length - 1; i++) {
+    const p1 = routePoints[i];
+    const p2 = routePoints[i + 1];
+    let maxSeverity = 0;
+
+    for (const d of origDetections) {
+      const dLat = d.geometry.coordinates[1];
+      const dLon = d.geometry.coordinates[0];
+      const dist1 = getDistanceMeters(p1[0], p1[1], dLat, dLon);
+      const dist2 = getDistanceMeters(p2[0], p2[1], dLat, dLon);
+      const minDist = Math.min(dist1, dist2);
+
+      if (minDist < 30) { // within 30 meters
+        const dmgType = d.properties?.damage_type;
+        const score = (dmgType === 'pothole' || dmgType === 'depression') ? 3
+          : (dmgType === 'crack') ? 2 : 1;
+        if (score > maxSeverity) maxSeverity = score;
+      }
+    }
+
+    let color = '#22c55e'; // Green (Safe)
+    if (maxSeverity === 3) color = '#ef4444'; // Red (Severe)
+    else if (maxSeverity === 2) color = '#f59e0b'; // Amber (Medium)
+    else if (maxSeverity === 1) color = '#eab308'; // Yellow (Minor)
+
+    segments.push({ positions: [p1, p2], color, weight: maxSeverity > 0 ? 6 : 4 });
+  }
+
+  // Merge adjacent segments of the same color for better performance
+  const merged = [];
+  if (segments.length > 0) {
+    let current = segments[0];
+    for (let i = 1; i < segments.length; i++) {
+      if (segments[i].color === current.color) {
+        current.positions.push(segments[i].positions[1]); // Append point
+      } else {
+        merged.push(current);
+        current = segments[i];
+      }
+    }
+    merged.push(current);
+  }
+  return merged;
+}
 
 const TILE_LAYERS = {
   satellite: {
@@ -90,12 +166,64 @@ function MapResizer() {
   return null;
 }
 
-export default function MapComponent({ clusters = [], onClusterClick, showHeatmap = false }) {
+export default function MapComponent({ clusters = [], detections = [], onClusterClick, showHeatmap = false }) {
   const [tileMode, setTileMode] = useState('satellite');
+  const [routeLines, setRouteLines] = useState({});
   const tile = TILE_LAYERS[tileMode];
 
-  const center = clusters.length > 0
-    ? [clusters[0].geometry.coordinates[1], clusters[0].geometry.coordinates[0]]
+  // Group detections and fetch snapped road paths via OSRM
+  useEffect(() => {
+    const groups = {};
+    detections.forEach(d => {
+      if (!d.geometry?.coordinates) return;
+      const vid = d.properties?.video_id || 'unknown';
+      if (!groups[vid]) groups[vid] = [];
+      groups[vid].push(d);
+    });
+
+    Object.entries(groups).forEach(async ([vid, points]) => {
+      // Sort by timestamp
+      points.sort((a, b) => new Date(a.properties?.timestamp || 0) - new Date(b.properties?.timestamp || 0));
+
+      // Extract [lon, lat] for OSRM
+      let coords = points.map(p => [p.geometry.coordinates[0], p.geometry.coordinates[1]]);
+      if (coords.length < 2) return;
+
+      // Downsample to max 90 points to avoid OSRM URL length / coordinate limits
+      if (coords.length > 90) {
+        const step = (coords.length - 1) / 89;
+        coords = Array.from({ length: 90 }, (_, i) => coords[Math.floor(i * step)]);
+      }
+
+      const coordsStr = coords.map(c => `${c[0].toFixed(5)},${c[1].toFixed(5)}`).join(';');
+
+      try {
+        const res = await fetch(`https://router.project-osrm.org/match/v1/driving/${coordsStr}?geometries=geojson&overview=full`);
+        if (!res.ok) throw new Error('OSRM match failed');
+        const data = await res.json();
+
+        if (data.code === 'Ok' && data.matchings && data.matchings.length > 0) {
+          // Extract snapped [lat, lon] coordinates and build colored segments
+          const snapped = data.matchings.flatMap(m => m.geometry.coordinates.map(c => [c[1], c[0]]));
+          const coloredSegments = buildColoredSegments(snapped, points);
+          setRouteLines(prev => ({ ...prev, [vid]: coloredSegments }));
+        } else {
+          // Fallback to straight lines if match fails
+          const rawLine = coords.map(c => [c[1], c[0]]);
+          setRouteLines(prev => ({ ...prev, [vid]: buildColoredSegments(rawLine, points) }));
+        }
+      } catch (e) {
+        console.warn('Failed to snap route for', vid, e);
+        const rawLine = coords.map(c => [c[1], c[0]]);
+        setRouteLines(prev => ({ ...prev, [vid]: buildColoredSegments(rawLine, points) }));
+      }
+    });
+  }, [detections]);
+
+  // Center on first available data point
+  const allPoints = [...clusters, ...detections].filter(d => d.geometry?.coordinates);
+  const center = allPoints.length > 0
+    ? [allPoints[0].geometry.coordinates[1], allPoints[0].geometry.coordinates[0]]
     : [23.0225, 72.5714]; // Ahmedabad default
 
   const formatScore = (s) => s != null ? `${Math.round(Number(s) * 100)}%` : '—';
@@ -138,7 +266,7 @@ export default function MapComponent({ clusters = [], onClusterClick, showHeatma
           const status = (p.status || 'pending').replace(/_/g, ' ');
 
           return (
-            <React.Fragment key={cluster._id || i}>
+            <React.Fragment key={cluster._id || `cl-${i}`}>
               <Circle center={coords} radius={p.radius_meters || 15}
                 pathOptions={{
                   color: col.stroke, fillColor: col.fill,
@@ -195,6 +323,32 @@ export default function MapComponent({ clusters = [], onClusterClick, showHeatma
             </React.Fragment>
           );
         })}
+
+        {/* Video Route Lines (Snapped and Colored by Damage) */}
+        {Object.entries(routeLines).map(([vid, segments]) => (
+          <LayerGroup key={`group-${vid}`}>
+            {segments.map((seg, idx) => (
+              <Polyline
+                key={`route-${vid}-${idx}`}
+                positions={seg.positions}
+                pathOptions={{
+                  color: seg.color,
+                  weight: seg.weight,
+                  opacity: 0.85,
+                  lineCap: 'round',
+                  lineJoin: 'round'
+                }}
+              >
+                <Popup>
+                  <div style={{ fontFamily: 'system-ui, sans-serif', fontSize: 12, fontWeight: 700 }}>
+                    🛣 Drive Route<br />
+                    <span style={{ color: '#64748b', fontSize: 10, fontWeight: 500 }}>ID: {vid}</span>
+                  </div>
+                </Popup>
+              </Polyline>
+            ))}
+          </LayerGroup>
+        ))}
 
         <MapResizer />
       </MapContainer>

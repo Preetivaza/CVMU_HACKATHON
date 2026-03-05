@@ -57,25 +57,42 @@ export class DetectionController {
       if (!isValid) {
         validationErrors.push({ index: i, errors });
       } else {
-        // map condition key to damage_type
-        const damageType = Object.keys(detection.conditions || {})[0] || 'Unknown';
-
-        validDetections.push({
-          type: 'Feature',
-          geometry: null,
-          properties: {
-            video_id: detection.video_id || videoId,
-            frame_id: detection.frame_id,
-            timestamp: detection.timestamp,
-            damage_type: damageType,
-            confidence: detection.confidence_level || 0,
-            severity_score: detection.damage_score || 0,
-            severity_label: detection.severity || 'Unknown',
-          },
-          cluster_id: null,
-          processed: false,
-          created_at: new Date(),
-        });
+        // Handle both GeoJSON Feature format (from AI script) and flat format (legacy)
+        let doc;
+        if (detection.type === 'Feature' && detection.properties) {
+          // GeoJSON Feature format — pass through with tracking fields
+          doc = {
+            type: 'Feature',
+            geometry: detection.geometry || null,
+            properties: {
+              ...detection.properties,
+              video_id: detection.properties.video_id || videoId,
+            },
+            cluster_id: null,
+            processed: false,
+            created_at: new Date(),
+          };
+        } else {
+          // Legacy flat format (conditions/damage_score)
+          const damageType = Object.keys(detection.conditions || {})[0] || 'Unknown';
+          doc = {
+            type: 'Feature',
+            geometry: null,
+            properties: {
+              video_id: detection.video_id || videoId,
+              frame_id: detection.frame_id,
+              timestamp: detection.timestamp,
+              damage_type: damageType,
+              confidence: detection.confidence_level || 0,
+              severity_score: detection.damage_score || 0,
+              severity_label: detection.severity || 'Unknown',
+            },
+            cluster_id: null,
+            processed: false,
+            created_at: new Date(),
+          };
+        }
+        validDetections.push(doc);
       }
     }
 
@@ -92,9 +109,30 @@ export class DetectionController {
       insertCount = insertResult.insertedCount;
     }
 
-    await UploadModel.updateStatus(videoId, 'completed', {
+    // If no GPS CSV was uploaded, backfill gps_data from AI detection coordinates
+    const extraFields = {
       'processing_result.detections_count': validDetections.length,
-    });
+    };
+    try {
+      const videoDoc = await UploadModel.findByVideoId(videoId);
+      if (videoDoc && (!videoDoc.gps_data || videoDoc.gps_data.length === 0)) {
+        const gpsPoints = validDetections
+          .filter(d => d.geometry && d.geometry.coordinates)
+          .map(d => ({
+            timestamp: d.properties?.timestamp ? new Date(d.properties.timestamp) : new Date(),
+            latitude: d.geometry.coordinates[1],
+            longitude: d.geometry.coordinates[0],
+            speed: d.properties?.vehicle_speed || 0,
+          }));
+        if (gpsPoints.length > 0) {
+          extraFields.gps_data = gpsPoints;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to backfill gps_data:', err);
+    }
+
+    await UploadModel.updateStatus(videoId, 'completed', extraFields);
 
     try {
       const videoDoc = await UploadModel.findById(videoId);

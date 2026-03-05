@@ -19,6 +19,7 @@ Full DBSCAN clustering pipeline:
 
 import numpy as np
 from datetime import datetime
+import dateutil.parser
 from typing import List, Dict, Any, Optional
 from bson import ObjectId
 
@@ -137,11 +138,21 @@ async def run_clustering(
 
             detection_ids = [d["_id"] for d in cluster_dets]
 
-            timestamps = [
+            raw_timestamps = [
                 d["properties"].get("timestamp") or d.get("created_at")
                 for d in cluster_dets
             ]
-            timestamps    = [t for t in timestamps if t]
+            timestamps = []
+            for t in raw_timestamps:
+                if t:
+                    if isinstance(t, str):
+                        try:
+                            timestamps.append(dateutil.parser.isoparse(t))
+                        except Exception:
+                            timestamps.append(datetime.utcnow())
+                    elif isinstance(t, datetime):
+                        timestamps.append(t)
+            
             first_detected = min(timestamps) if timestamps else datetime.utcnow()
             last_detected  = max(timestamps) if timestamps else datetime.utcnow()
 

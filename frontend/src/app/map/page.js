@@ -68,6 +68,7 @@ function StatusBtn({ status, current, onClick }) {
 
 export default function MapPage() {
   const [clusters, setClusters] = useState([]);
+  const [detections, setDetections] = useState([]);
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState('All');
   const [loading, setLoading] = useState(true);
@@ -78,9 +79,17 @@ export default function MapPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await authFetch('/api/v1/clusters?limit=100');
-      const data = await res.json();
-      if (data.features) setClusters(data.features);
+      const [clusterRes, detRes] = await Promise.all([
+        authFetch('/api/v1/clusters?limit=100'),
+        authFetch('/api/v1/detections?limit=100'),
+      ]);
+      const clusterData = await clusterRes.json();
+      const detData = await detRes.json();
+      if (clusterData.features) setClusters(clusterData.features);
+      // Show all detections that have geometry (individual damage points)
+      const rawDetections = detData.features || [];
+      const validDetections = rawDetections.filter(d => d.geometry?.coordinates);
+      setDetections(validDetections);
     } finally {
       setLoading(false);
     }
@@ -134,7 +143,7 @@ export default function MapPage() {
           <p className="page-eyebrow">Live Infrastructure</p>
           <h1 className="page-title">Road Damage Map</h1>
           <p className="page-subtitle">
-            Showing <strong>{filtered.length}</strong> of <strong>{clusters.length}</strong> clusters
+            Showing <strong>{filtered.length}</strong> clusters and <strong>{detections.length}</strong> damage points
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -248,7 +257,7 @@ export default function MapPage() {
 
         {/* Main Map */}
         <div style={{ flex: 1, borderRadius: 12, overflow: 'hidden', position: 'relative', minWidth: 0 }}>
-          <MapComponent clusters={filtered} onClusterClick={setSelected} showHeatmap={showHeatmap} />
+          <MapComponent clusters={filtered} detections={detections} onClusterClick={setSelected} showHeatmap={showHeatmap} />
         </div>
 
         {/* Right Sidebar — Cluster Detail */}

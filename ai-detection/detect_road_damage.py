@@ -14,7 +14,7 @@ from road_simulator import RoadSimulator
 import argparse
 
 parser = argparse.ArgumentParser(description='Run Road Damage Detection')
-parser.add_argument('--video', type=str, default="test_data/test.mp4", help='Path to video file')
+parser.add_argument('--video', type=str, default="test_data/test3_clear", help='Path to video file')
 parser.add_argument('--api_url', type=str, default="http://localhost:3000/api/v1/detections/bulk", help='Next.js API URL')
 parser.add_argument('--export', action='store_true', help='Export detections to API')
 parser.add_argument('--video_id', type=str, default=None, help='Video ID for the API')
@@ -310,6 +310,12 @@ def main():
             response = requests.post(NEXTJS_API_URL, json=final_payload, headers=headers)
             if response.status_code in (200, 201):
                 print(f"Uploaded successfully! {response.json().get('inserted_count', 0)} detections stored.")
+                # Delete local JSON file after successful upload
+                try:
+                    os.remove(JSON_OUTPUT_PATH)
+                    print(f"Deleted local file: {JSON_OUTPUT_PATH}")
+                except OSError as e:
+                    print(f"Warning: Could not delete {JSON_OUTPUT_PATH}: {e}")
             else:
                 print(f"Failed to upload. Status code: {response.status_code}, Response: {response.text}")
         except Exception as e:
