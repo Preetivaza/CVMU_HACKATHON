@@ -14,7 +14,7 @@ from road_simulator import RoadSimulator
 import argparse
 
 parser = argparse.ArgumentParser(description='Run Road Damage Detection')
-parser.add_argument('--video', type=str, default="test_data/test3_clear.mp4", help='Path to video file')
+parser.add_argument('--video', type=str, default="test_data/test.mp4", help='Path to video file')
 parser.add_argument('--api_url', type=str, default="http://localhost:3000/api/v1/detections/bulk", help='Next.js API URL')
 parser.add_argument('--export', action='store_true', help='Export detections to API')
 parser.add_argument('--video_id', type=str, default=None, help='Video ID for the API')
