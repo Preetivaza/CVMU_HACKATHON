@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 // Must match INTERNAL_API_KEY in .env.local
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || 'sadaksurksha_internal_ml_service_2026';
 
-export function middleware(request) {
+export function proxy(request) {
     const { pathname } = request.nextUrl;
 
     // ── 1. Fully public paths — no auth required ──────────────────────────────
