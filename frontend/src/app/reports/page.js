@@ -47,7 +47,6 @@ export default function ReportsPage() {
         ? Math.round(clusters.reduce((s, c) => s + (c.properties?.final_risk_score || 0), 0) / total * 100)
         : 0;
     const repairRate = total > 0 ? Math.round((repairedCount / total) * 100) : 0;
-    const complianceViolations = clusters.filter(c => c.properties?.temporal_status === 'compliance_violation').length;
 
     // Damage type breakdown
     const damageMap = {};
@@ -98,12 +97,11 @@ export default function ReportsPage() {
             </div>
 
             {/* Summary Key Metrics */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16, marginBottom: 28 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
                 <MetricCard icon="🗂️" label="Total Clusters" value={total} sub="Detected damage zones" color="#2563eb" />
-                <MetricCard icon="✅" label="Repaired" value={`${repairedCount} (${repairRate}%)`} sub="Completed repairs" color="#16a34a" />
+                <MetricCard icon="✅" label="Repaired" value={repairedCount} sub="Completed repairs" color="#16a34a" />
                 <MetricCard icon="🔧" label="In Progress" value={inProgressCount} sub="Active repair work" color="#ea580c" />
                 <MetricCard icon="📊" label="Avg Risk Score" value={`${avgScore}%`} sub="Platform-wide average" color="#7c3aed" />
-                <MetricCard icon="⚠️" label="Violations" value={complianceViolations} sub="Contractor compliance" color="#dc2626" />
             </div>
 
             {/* Middle Row */}
@@ -194,7 +192,7 @@ export default function ReportsPage() {
                                     const p = c.properties || {};
                                     const level = p.risk_level || 'Low';
                                     const [lon, lat] = c.geometry?.coordinates || [0, 0];
-                                    const statusColors = { pending: '#f97316', in_progress: '#2563eb', repaired: '#16a34a', compliance_violation: '#dc2626' };
+                                    const statusColors = { pending: '#f97316', in_progress: '#2563eb', repaired: '#16a34a' };
                                     return (
                                         <tr key={i}>
                                             <td style={{ fontWeight: 800, color: i < 3 ? '#dc2626' : '#64748b' }}>#{i + 1}</td>

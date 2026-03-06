@@ -15,7 +15,6 @@ L.Marker.prototype.options.icon = DefaultIcon;
 
 const RISK_COLORS = {
   Critical: { stroke: '#ef4444', fill: '#ef4444', text: '#dc2626', bg: '#fee2e2', glow: '0 0 16px rgba(239,68,68,0.8)' },
-  High: { stroke: '#f97316', fill: '#f97316', text: '#ea580c', bg: '#fff7ed', glow: '0 0 12px rgba(249,115,22,0.7)' },
   Medium: { stroke: '#eab308', fill: '#eab308', text: '#ca8a04', bg: '#fefce8', glow: '0 0 10px rgba(234,179,8,0.6)' },
   Low: { stroke: '#22c55e', fill: '#22c55e', text: '#16a34a', bg: '#f0fdf4', glow: '0 0 10px rgba(34,197,94,0.5)' },
 };
@@ -119,7 +118,7 @@ const TILE_LAYERS = {
 
 function createPulsingIcon(level) {
   const c = RISK_COLORS[level] || RISK_COLORS.Low;
-  const size = level === 'Critical' ? 22 : level === 'High' ? 18 : 15;
+  const size = level === 'Critical' ? 22 : 15;
   const html = `
     <div style="position:relative;width:${size}px;height:${size}px;">
       <div style="position:absolute;inset:0;border-radius:50%;background:${c.fill};opacity:0.3;
@@ -166,7 +165,19 @@ function MapResizer() {
   return null;
 }
 
-export default function MapComponent({ clusters = [], detections = [], onClusterClick, showHeatmap = false }) {
+function FlyToSelected({ cluster }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!cluster) return;
+    const coords = cluster.geometry?.coordinates;
+    if (coords) {
+      setTimeout(() => map.flyTo([coords[1], coords[0]], 17, { animate: true, duration: 1.2 }), 200);
+    }
+  }, [cluster, map]);
+  return null;
+}
+
+export default function MapComponent({ clusters = [], detections = [], onClusterClick, showHeatmap = false, selectedId = null }) {
   const [tileMode, setTileMode] = useState('satellite');
   const [routeLines, setRouteLines] = useState({});
   const tile = TILE_LAYERS[tileMode];
@@ -228,6 +239,11 @@ export default function MapComponent({ clusters = [], detections = [], onCluster
 
   const formatScore = (s) => s != null ? `${Math.round(Number(s) * 100)}%` : '—';
 
+  // The cluster to auto-fly to when navigated via Inspect button
+  const highlightedCluster = selectedId
+    ? clusters.find(c => (c.properties?._id === selectedId) || (c._id === selectedId))
+    : null;
+
   return (
     <div style={{ height: '100%', width: '100%', borderRadius: 12, overflow: 'hidden', position: 'relative' }}>
       {/* Tile layer toggle */}
@@ -254,6 +270,7 @@ export default function MapComponent({ clusters = [], detections = [], onCluster
         <TileLayer key={tileMode} attribution={tile.attribution} url={tile.url} maxZoom={tile.maxZoom} />
 
         {showHeatmap && <HeatmapLayer clusters={clusters} />}
+        <FlyToSelected cluster={highlightedCluster} />
 
         {clusters.map((cluster, i) => {
           const level = cluster.properties?.risk_level || 'Low';
@@ -264,9 +281,22 @@ export default function MapComponent({ clusters = [], detections = [], onCluster
           const score = formatScore(p.final_risk_score);
           const repeatCount = p.repeat_count || 1;
           const status = (p.status || 'pending').replace(/_/g, ' ');
+          const isHighlighted = selectedId && (
+            (p._id === selectedId) || (cluster._id === selectedId)
+          );
 
           return (
             <React.Fragment key={cluster._id || `cl-${i}`}>
+              {isHighlighted && (
+                <Circle center={coords} radius={60}
+                  pathOptions={{
+                    color: '#facc15', fillColor: '#facc15',
+                    fillOpacity: 0.12, weight: 5,
+                    dashArray: '8 4',
+                    opacity: 0.9,
+                  }}
+                />
+              )}
               <Circle center={coords} radius={p.radius_meters || 15}
                 pathOptions={{
                   color: col.stroke, fillColor: col.fill,

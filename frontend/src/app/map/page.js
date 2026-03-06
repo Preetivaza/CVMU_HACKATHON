@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { authFetch } from '@/utils/authFetch';
+import { useSearchParams } from 'next/navigation';
 
 const TIME_RANGES = [
   { label: 'Last 24h', value: '24h' },
@@ -47,11 +48,11 @@ const MapComponent = dynamic(() => import('@/components/MapComponent'), {
   ),
 });
 
-const RISK_FILTERS = ['All', 'Critical', 'High', 'Medium', 'Low'];
-const STATUS_LABELS = { pending: 'Pending', in_progress: 'In Progress', repaired: 'Repaired', compliance_violation: '⚠️ Violation' };
-const STATUS_COLORS = { pending: '#f97316', in_progress: '#2563eb', repaired: '#16a34a', compliance_violation: '#dc2626' };
-const RISK_COLORS = { Critical: '#dc2626', High: '#ea580c', Medium: '#ca8a04', Low: '#16a34a' };
-const RISK_BG = { Critical: '#fee2e2', High: '#fff7ed', Medium: '#fefce8', Low: '#f0fdf4' };
+const RISK_FILTERS = ['All', 'Critical', 'Medium', 'Low'];
+const STATUS_LABELS = { pending: 'Pending', in_progress: 'In Progress', repaired: 'Repaired' };
+const STATUS_COLORS = { pending: '#f97316', in_progress: '#2563eb', repaired: '#16a34a' };
+const RISK_COLORS = { Critical: '#dc2626', Medium: '#ca8a04', Low: '#16a34a' };
+const RISK_BG = { Critical: '#fee2e2', Medium: '#fefce8', Low: '#f0fdf4' };
 
 function RiskBadge({ level }) {
   const l = level || 'Low';
@@ -106,6 +107,8 @@ export default function MapPage() {
   const [msg, setMsg] = useState(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const debounceRef = useRef(null);
+  const searchParams = useSearchParams();
+  const highlightId = searchParams.get('id');
 
   const load = useCallback(async (tr = timeFilter) => {
     setLoading(true);
@@ -117,14 +120,30 @@ export default function MapPage() {
       ]);
       const clusterData = await clusterRes.json();
       const detData = await detRes.json();
-      if (clusterData.features) setClusters(clusterData.features);
+      if (clusterData.features) {
+        const mapped = clusterData.features.map(f => {
+          if (f.properties && f.properties.risk_level === 'High') {
+            f.properties.risk_level = 'Critical';
+          }
+          return f;
+        });
+        setClusters(mapped);
+        // Auto-select the highlighted cluster from the ?id= param
+        if (highlightId) {
+          const match = mapped.find(c =>
+            (c.properties?._id === highlightId) ||
+            (c._id === highlightId)
+          );
+          if (match) setSelected(match);
+        }
+      }
       const rawDetections = detData.features || [];
       const validDetections = rawDetections.filter(d => d.geometry?.coordinates);
       setDetections(validDetections);
     } finally {
       setLoading(false);
     }
-  }, [timeFilter]);
+  }, [timeFilter, highlightId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -167,7 +186,7 @@ export default function MapPage() {
     }
   };
 
-  const riskCounts = ['Critical', 'High', 'Medium', 'Low'].reduce((acc, level) => {
+  const riskCounts = ['Critical', 'Medium', 'Low'].reduce((acc, level) => {
     acc[level] = clusters.filter(c => (c.properties?.risk_level || '').toLowerCase() === level.toLowerCase()).length;
     return acc;
   }, {});
@@ -296,7 +315,7 @@ export default function MapPage() {
 
         {/* Main Map */}
         <div style={{ flex: 1, borderRadius: 12, overflow: 'hidden', position: 'relative', minWidth: 0 }}>
-          <MapComponent clusters={filtered} detections={detections} onClusterClick={setSelected} showHeatmap={showHeatmap} />
+          <MapComponent clusters={filtered} detections={detections} onClusterClick={setSelected} showHeatmap={showHeatmap} selectedId={highlightId} />
         </div>
 
         {/* Right Sidebar — Cluster Detail */}

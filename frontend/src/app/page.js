@@ -4,12 +4,12 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { authFetch } from '@/utils/authFetch';
 
-const RISK_COLORS = { Critical: '#dc2626', High: '#ea580c', Medium: '#ca8a04', Low: '#16a34a' };
-const RISK_BG = { Critical: '#fee2e2', High: '#fff7ed', Medium: '#fefce8', Low: '#f0fdf4' };
+const RISK_COLORS = { Critical: '#dc2626', Medium: '#ca8a04', Low: '#16a34a' };
+const RISK_BG = { Critical: '#fee2e2', Medium: '#fefce8', Low: '#f0fdf4' };
 
 // Cost model per damage type (INR in thousands)
-const REPAIR_COSTS = { pothole: 45, crack: 18, patch: 12, depression: 28, unknown: 20 };
-const SEVERITY_MULTIPLIER = { Critical: 2.5, High: 1.6, Medium: 1.0, Low: 0.6 };
+const REPAIR_COSTS = { pothole: 120, crack: 45, patch: 25, depression: 80, unknown: 30 };
+const SEVERITY_MULTIPLIER = { Critical: 2.5, Medium: 1.0, Low: 0.6 };
 
 function StatCard({ icon, color, bg, label, value, sub, href }) {
   const inner = (
@@ -132,32 +132,46 @@ export default function Dashboard() {
         // Fallback static data
         const FALLBACK_CLUSTERS = [
           { location: { coordinates: [72.8777, 19.0760] }, damage_types: { pothole: 3, crack: 1 }, risk_score: 92, risk_level: 'Critical', status: 'active', temporal_status: 'compliance_violation', repeat_count: 4 },
-          { location: { coordinates: [72.8877, 19.0860] }, damage_types: { depression: 2 }, risk_score: 65, risk_level: 'High', status: 'active', temporal_status: 'recent', repeat_count: 1 },
+          { location: { coordinates: [72.8877, 19.0860] }, damage_types: { depression: 2 }, risk_score: 65, risk_level: 'Critical', status: 'active', temporal_status: 'recent', repeat_count: 1 },
           { location: { coordinates: [72.8677, 19.0660] }, damage_types: { patch: 1 }, risk_score: 30, risk_level: 'Low', status: 'repaired', temporal_status: 'resolved', repeat_count: 1 },
           { location: { coordinates: [72.8977, 19.0960] }, damage_types: { pothole: 1 }, risk_score: 55, risk_level: 'Medium', status: 'active', temporal_status: 'new', repeat_count: 1 }
         ];
 
         setStats({
-          totalClusters: 42,
+          totalClusters: 42 - 12,
           recentUploads: 5,
-          critical: 8,
+          critical: 9,
           repaired: 12,
         });
         setClusters(FALLBACK_CLUSTERS);
         setAllClusters(FALLBACK_CLUSTERS);
       } else {
+        const mappedAllClusters = (allRes.features || []).map(f => {
+          const p = { ...(f.properties || f) };
+          if (p.risk_level === 'High') p.risk_level = 'Critical';
+          return p;
+        });
+
+        const mappedRankClusters = (rankRes.ranking || []).map(c => {
+          const clone = { ...c };
+          if (clone.risk_level === 'High') clone.risk_level = 'Critical';
+          return clone;
+        });
+
         if (debugRes.data_summary) {
-          const critCount = (rankRes.ranking || []).filter(c => (c.risk_level || '').toLowerCase() === 'critical').length;
-          const repaired = (rankRes.ranking || []).filter(c => c.status === 'repaired').length;
+          const critCount = mappedAllClusters.filter(c => (c.risk_level || '').toLowerCase() === 'critical').length;
+          const repaired = mappedAllClusters.filter(c => c.status === 'repaired').length;
+          const totalClusters = debugRes.data_summary?.clusters_count || 0;
+
           setStats({
-            totalClusters: debugRes.data_summary?.clusters_count || 0,
+            totalClusters: Math.max(0, totalClusters - repaired),
             recentUploads: debugRes.data_summary?.uploads_count || 0,
             critical: critCount,
             repaired,
           });
         }
-        setClusters(rankRes.ranking || []);
-        setAllClusters((allRes.features || []).map(f => f.properties || f));
+        setClusters(mappedRankClusters);
+        setAllClusters(mappedAllClusters);
       }
     } finally {
       setLoading(false);
@@ -213,11 +227,9 @@ export default function Dashboard() {
   // AI Insights
   const criticalClusters = allClusters.filter(c => (c.risk_level || '').toLowerCase() === 'critical').length;
   const repeatClusters = allClusters.filter(c => (c.repeat_count || 1) > 2).length;
-  const violationClusters = allClusters.filter(c => c.temporal_status === 'compliance_violation').length;
   const insights = [
     criticalClusters > 0 && { type: 'critical', icon: '🚨', text: `${criticalClusters} critical cluster${criticalClusters > 1 ? 's' : ''} require immediate dispatch`, action: 'View on Map', href: '/map' },
     repeatClusters > 0 && { type: 'warning', icon: '🔁', text: `${repeatClusters} zone${repeatClusters > 1 ? 's' : ''} with repeat detection — chronic damage pattern`, action: 'View Report', href: '/reports' },
-    violationClusters > 0 && { type: 'error', icon: '⚠️', text: `${violationClusters} contractor compliance violation${violationClusters > 1 ? 's' : ''} detected`, action: 'Reports', href: '/reports' },
     stats.totalClusters === 0 && { type: 'info', icon: '📤', text: 'No data yet. Upload survey footage to begin AI analysis.', action: 'Upload Now', href: '/upload' },
   ].filter(Boolean);
 
@@ -377,7 +389,7 @@ export default function Dashboard() {
                           ₹{cost}K
                         </td>
                         <td>
-                          <Link href="/map" style={{
+                          <Link href={`/map?id=${c._id || c.cluster_id || ''}`} style={{
                             fontSize: 12, fontWeight: 700, color: '#2563eb', textDecoration: 'none',
                             padding: '4px 10px', background: '#eff6ff', borderRadius: 5, border: '1px solid #bfdbfe',
                           }}>
@@ -456,8 +468,8 @@ export default function Dashboard() {
               </div>
               {[
                 { label: 'Critical zones', value: `₹${Math.round(critCost)}K`, color: '#dc2626' },
-                { label: 'Potholes (avg)', value: '₹45K each', color: '#ea580c' },
-                { label: 'Cracks (avg)', value: '₹18K each', color: '#ca8a04' },
+                { label: 'Potholes (avg)', value: '₹1.2L each', color: '#ea580c' },
+                { label: 'Cracks (avg)', value: '₹45K each', color: '#ca8a04' },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid #f8fafc' }}>
                   <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>{label}</span>
