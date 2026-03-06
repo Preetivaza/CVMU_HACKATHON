@@ -108,7 +108,6 @@ export default function Dashboard() {
   const [stats, setStats] = useState({ totalClusters: 0, critical: 0, repaired: 0, recentUploads: 0 });
   const [clusters, setClusters] = useState([]);
   const [allClusters, setAllClusters] = useState([]);
-  const [trend, setTrend] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processingUploads, setProcessingUploads] = useState([]);
   const [pollWarning, setPollWarning] = useState(false);
@@ -121,10 +120,9 @@ export default function Dashboard() {
     setLoading(true);
     try {
       const trParam = tr !== 'all' ? `&time_range=${tr}` : '';
-      const [debugRes, rankRes, trendRes, allRes] = await Promise.all([
+      const [debugRes, rankRes, allRes] = await Promise.all([
         authFetch('/api/v1/debug').then(r => r.json()).catch(() => ({})),
         authFetch(`/api/v1/analytics/priority-ranking?limit=5${trParam}`).then(r => r.json()).catch(() => ({})),
-        authFetch(`/api/v1/analytics/monthly-trend${tr !== 'all' ? `?time_range=${tr}` : ''}`).then(r => r.json()).catch(() => ({})),
         authFetch(`/api/v1/clusters?limit=500${trParam}`).then(r => r.json()).catch(() => ({})),
       ]);
 
@@ -147,12 +145,8 @@ export default function Dashboard() {
         });
         setClusters(FALLBACK_CLUSTERS);
         setAllClusters(FALLBACK_CLUSTERS);
-        setTrend([
-          { _id: "2026-02", total_detections: 120, auto_repaired: 40, critical: 10 },
-          { _id: "2026-03", total_detections: 156, auto_repaired: 60, critical: 15 }
-        ]);
       } else {
-        if (debugRes.success) {
+        if (debugRes.data_summary) {
           const critCount = (rankRes.ranking || []).filter(c => (c.risk_level || '').toLowerCase() === 'critical').length;
           const repaired = (rankRes.ranking || []).filter(c => c.status === 'repaired').length;
           setStats({
@@ -164,7 +158,6 @@ export default function Dashboard() {
         }
         setClusters(rankRes.ranking || []);
         setAllClusters((allRes.features || []).map(f => f.properties || f));
-        setTrend(trendRes.trend || []);
       }
     } finally {
       setLoading(false);
@@ -203,7 +196,6 @@ export default function Dashboard() {
   // Reload data when time filter changes
   useEffect(() => { load(timeFilter); }, [timeFilter]); // eslint-disable-line
 
-  const maxTrend = Math.max(...trend.map(t => t.total_detections || 0), 1);
   const healthScore = computeHealthScore(allClusters);
   const totalCost = estimateRepairCost(allClusters);
   const critCost = estimateRepairCost(allClusters.filter(c => (c.risk_level || '').toLowerCase() === 'critical'));
@@ -213,7 +205,7 @@ export default function Dashboard() {
 
   const statCards = [
     { icon: '🗂️', color: '#2563eb', bg: '#eff6ff', label: 'Active Clusters', value: stats.totalClusters, sub: 'Damage zones detected', href: '/map' },
-    { icon: '🚨', color: '#dc2626', bg: '#fee2e2', label: 'Critical Risk', value: stats.critical, sub: 'Require immediate repair', href: '/analytics' },
+    { icon: '🚨', color: '#dc2626', bg: '#fee2e2', label: 'Critical Risk', value: stats.critical, sub: 'Require immediate repair', href: '/reports' },
     { icon: '✅', color: '#16a34a', bg: '#f0fdf4', label: 'Repairs Completed', value: stats.repaired, sub: 'This reporting period' },
     { icon: '📹', color: '#0284c7', bg: '#f0f9ff', label: 'Videos Processed', value: stats.recentUploads, sub: 'Survey footage analyzed', href: '/upload' },
   ];
@@ -375,9 +367,9 @@ export default function Dashboard() {
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <div style={{ width: 60, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                              <div style={{ height: '100%', width: `${Math.min(c.risk_score, 100)}%`, background: '#ef4444', borderRadius: 3 }} />
+                              <div style={{ height: '100%', width: `${Math.min((c.risk_score || 0) * 100, 100)}%`, background: '#ef4444', borderRadius: 3 }} />
                             </div>
-                            <span style={{ fontWeight: 800, color: '#0f172a', fontSize: 13 }}>{Math.round(c.risk_score || 0)}%</span>
+                            <span style={{ fontWeight: 800, color: '#0f172a', fontSize: 13 }}>{Math.round((c.risk_score || 0) * 100)}%</span>
                           </div>
                         </td>
                         <td><RiskBadge level={c.risk_level} /></td>

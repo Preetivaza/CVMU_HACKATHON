@@ -32,7 +32,6 @@ const navGroups = [
   {
     label: "Analysis",
     items: [
-      { href: "/analytics", icon: BarChart3, label: "Analytics" },
       { href: "/reports", icon: FileText, label: "Reports" },
     ],
   },
@@ -123,7 +122,6 @@ export default function AppShell({ children }) {
   const pageTitles = {
     '/': 'Dashboard Overview',
     '/map': 'Live Infrastructure Map',
-    '/analytics': 'Analytics & Reporting',
     '/reports': 'Reports Center',
     '/upload': 'Data Upload',
     '/settings': 'Account Settings',
