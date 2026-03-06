@@ -57,6 +57,23 @@ async def run_clustering(
     detections_col = get_collection(Collections.RAW_DETECTIONS)
     clusters_col   = get_collection(Collections.CLUSTERS)
 
+    # ── Pre-flight: database-level idempotency guard ─────────────────────────
+    # If this video_id was already successfully clustered and force_recluster
+    # is not explicitly requested, skip the entire pipeline.
+    if video_id and not force_recluster:
+        uploads_col = get_collection(Collections.VIDEO_UPLOADS)
+        upload_doc = await uploads_col.find_one({"video_id": video_id})
+        if upload_doc and upload_doc.get("clustered") is True:
+            print(f"[Clustering] video_id='{video_id}' already clustered. Skipping (use force_recluster=True to override).")
+            return {
+                "status": "already_clustered",
+                "clusters_created": 0,
+                "detections_processed": 0,
+                "per_type_breakdown": {},
+                "pothole_summary": [],
+                "message": f"video_id='{video_id}' was already clustered. No changes made.",
+            }
+
     # ── Step 1: Fetch detections ───────────────────────────────────────────────
     query: Dict = {}
     if video_id:
@@ -64,7 +81,25 @@ async def run_clustering(
     if not force_recluster:
         query["processed"] = False
 
-    detections = await detections_col.find(query).to_list(length=None)
+    raw_detections = await detections_col.find(query).to_list(length=None)
+
+    # ── Quarantine Malformed Data ─────────────────────────────────────────────
+    # Sometimes legacy/broken data has geometry: null, which crashes DBSCAN.
+    detections = []
+    broken_ids = []
+    for det in raw_detections:
+        geom = det.get("geometry")
+        if not geom or "coordinates" not in geom or not isinstance(geom["coordinates"], list) or len(geom["coordinates"]) < 2:
+            broken_ids.append(det["_id"])
+        else:
+            detections.append(det)
+            
+    if broken_ids:
+        print(f"[Clustering] Quarantined {len(broken_ids)} malformed detections (missing coordinates).")
+        await detections_col.update_many(
+            {"_id": {"$in": broken_ids}},
+            {"$set": {"processed": True, "cluster_id": "malformed_geometry_error"}}
+        )
 
     if not detections:
         return {
@@ -349,7 +384,7 @@ async def run_clustering(
             "eps_meters":        model.eps_meters,
         }
 
-    # ── Step 6: Update Video Upload Status ────────────────────────────────────
+    # ── Step 6: Update Video Upload Status + mark clustered ──────────────────
     if video_id:
         uploads_col = get_collection(Collections.VIDEO_UPLOADS)
         await uploads_col.update_one(
@@ -357,6 +392,7 @@ async def run_clustering(
             {
                 "$set": {
                     "status": "completed",
+                    "clustered": True,          # idempotency guard — prevents re-run
                     "updated_at": datetime.utcnow()
                 }
             }

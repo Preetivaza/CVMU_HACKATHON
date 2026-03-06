@@ -3,6 +3,35 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { authFetch } from '@/utils/authFetch';
 
+const TIME_RANGES = [
+  { label: 'Last 24h', value: '24h' },
+  { label: 'Last 7 Days', value: '7d' },
+  { label: 'Last 30 Days', value: '30d' },
+  { label: 'All Time', value: 'all' },
+];
+
+function TimeFilter({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 4, background: '#f1f5f9', borderRadius: 8, padding: 3 }}>
+      {TIME_RANGES.map(r => (
+        <button
+          key={r.value}
+          onClick={() => onChange(r.value)}
+          style={{
+            padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
+            fontSize: 12, fontWeight: 700,
+            background: value === r.value ? '#2563eb' : 'transparent',
+            color: value === r.value ? 'white' : '#64748b',
+            transition: 'all 0.15s',
+          }}
+        >
+          {r.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const RISK_COLORS = { Critical: '#dc2626', High: '#ea580c', Medium: '#ca8a04', Low: '#16a34a' };
 const RISK_BG = { Critical: '#fee2e2', High: '#fff7ed', Medium: '#fefce8', Low: '#f0fdf4' };
 
@@ -29,13 +58,15 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('risk_score');
   const [sortDir, setSortDir] = useState('desc');
+  const [timeFilter, setTimeFilter] = useState('all');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (tr = timeFilter) => {
     setLoading(true);
     try {
+      const trParam = tr !== 'all' ? `?time_range=${tr}` : '';
       const [rankRes, trendRes] = await Promise.all([
-        authFetch('/api/v1/analytics/priority-ranking?limit=20').then(r => r.json()).catch(() => ({})),
-        authFetch('/api/v1/analytics/monthly-trend').then(r => r.json()).catch(() => ({})),
+        authFetch(`/api/v1/analytics/priority-ranking?limit=20${tr !== 'all' ? `&time_range=${tr}` : ''}`).then(r => r.json()).catch(() => ({})),
+        authFetch(`/api/v1/analytics/monthly-trend${trParam}`).then(r => r.json()).catch(() => ({})),
       ]);
 
       const r = rankRes.ranking || [];
@@ -51,9 +82,10 @@ export default function AnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [timeFilter]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(timeFilter); }, [timeFilter]); // eslint-disable-line
 
   const sorted = [...ranking].sort((a, b) => {
     const dir = sortDir === 'desc' ? -1 : 1;
@@ -104,9 +136,12 @@ export default function AnalyticsPage() {
           <h1 className="page-title">Infrastructure Analytics</h1>
           <p className="page-subtitle">Statistical analysis of road damage patterns, risk distribution, and repair performance.</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-          <button onClick={load} className="btn btn-secondary btn-sm">🔄 Refresh</button>
-          <button onClick={handleExport} className="btn btn-primary btn-sm">⬇ Export CSV</button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10, marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => load(timeFilter)} className="btn btn-secondary btn-sm">🔄 Refresh</button>
+            <button onClick={handleExport} className="btn btn-primary btn-sm">⬇ Export CSV</button>
+          </div>
+          <TimeFilter value={timeFilter} onChange={setTimeFilter} />
         </div>
       </div>
 

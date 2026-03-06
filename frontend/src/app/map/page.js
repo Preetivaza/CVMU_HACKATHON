@@ -1,8 +1,37 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { authFetch } from '@/utils/authFetch';
+
+const TIME_RANGES = [
+  { label: 'Last 24h', value: '24h' },
+  { label: 'Last 7 Days', value: '7d' },
+  { label: 'Last 30 Days', value: '30d' },
+  { label: 'All Time', value: 'all' },
+];
+
+function TimeFilter({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 4, background: '#f1f5f9', borderRadius: 8, padding: 3 }}>
+      {TIME_RANGES.map(r => (
+        <button
+          key={r.value}
+          onClick={() => onChange(r.value)}
+          style={{
+            padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
+            fontSize: 12, fontWeight: 700,
+            background: value === r.value ? '#2563eb' : 'transparent',
+            color: value === r.value ? 'white' : '#64748b',
+            transition: 'all 0.15s',
+          }}
+        >
+          {r.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const MapComponent = dynamic(() => import('@/components/MapComponent'), {
   ssr: false,
@@ -71,31 +100,40 @@ export default function MapPage() {
   const [detections, setDetections] = useState([]);
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState('All');
+  const [timeFilter, setTimeFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [msg, setMsg] = useState(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const debounceRef = useRef(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (tr = timeFilter) => {
     setLoading(true);
     try {
+      const trParam = tr !== 'all' ? `&time_range=${tr}` : '';
       const [clusterRes, detRes] = await Promise.all([
-        authFetch('/api/v1/clusters?limit=100'),
+        authFetch(`/api/v1/clusters?limit=100${trParam}`),
         authFetch('/api/v1/detections?limit=100'),
       ]);
       const clusterData = await clusterRes.json();
       const detData = await detRes.json();
       if (clusterData.features) setClusters(clusterData.features);
-      // Show all detections that have geometry (individual damage points)
       const rawDetections = detData.features || [];
       const validDetections = rawDetections.filter(d => d.geometry?.coordinates);
       setDetections(validDetections);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [timeFilter]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Debounced re-fetch when timeFilter changes (300ms)
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => load(timeFilter), 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [timeFilter]); // eslint-disable-line
 
   const filtered = filter === 'All'
     ? clusters
@@ -154,7 +192,8 @@ export default function MapPage() {
             <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', animation: 'pulse-dot 2s ease-in-out infinite' }} />
             <span style={{ fontSize: 11, fontWeight: 800, color: '#15803d', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Live Feed</span>
           </div>
-          <button onClick={load} className="btn btn-secondary btn-sm">🔄 Refresh</button>
+          <TimeFilter value={timeFilter} onChange={setTimeFilter} />
+          <button onClick={() => load(timeFilter)} className="btn btn-secondary btn-sm">🔄 Refresh</button>
           <button
             onClick={() => setShowHeatmap(h => !h)}
             style={{
@@ -298,9 +337,10 @@ export default function MapPage() {
               {/* Stats Grid */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
                 {[
-                  { label: 'Risk Index', value: `${Math.round((selected.properties?.final_risk_score || 0) * 100)}%` },
-                  { label: 'Confidence', value: `${Math.round((selected.properties?.avg_confidence || 0) * 100)}%` },
-                  { label: 'Feature Points', value: selected.properties?.points_count || '—' },
+                  { label: 'Overall Risk Index', value: `${Math.round((selected.properties?.final_risk_score || 0) * 100)}%` },
+                  { label: 'Satellite Risk (Aging)', value: selected.properties?.aging_index != null ? `${Math.round(selected.properties.aging_index * 100)}%` : 'Pending GEE' },
+                  { label: 'AI Confidence', value: `${Math.round((selected.properties?.avg_confidence || 0) * 100)}%` },
+                  { label: 'Frames/Points', value: selected.properties?.points_count || '—' },
                   { label: 'Repeat Count', value: `${selected.properties?.repeat_count || 1}×` },
                 ].map(({ label, value }, i) => (
                   <div key={i} style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 12px', border: '1px solid #f1f5f9' }}>

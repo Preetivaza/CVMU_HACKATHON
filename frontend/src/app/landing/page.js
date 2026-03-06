@@ -177,18 +177,19 @@ export default function LandingPage() {
                     >
                         Open Platform Dashboard →
                     </Link>
-                    <a href="#how-it-works" style={{
+                    <Link href="/public-report" style={{
                         background: 'rgba(255,255,255,0.05)',
                         border: '1px solid rgba(255,255,255,0.12)',
                         color: 'rgba(255,255,255,0.85)', padding: '14px 32px', borderRadius: 10,
                         fontSize: 15, fontWeight: 600, textDecoration: 'none',
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
                         transition: 'background 0.15s',
                     }}
                         onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
                     >
-                        See How It Works
-                    </a>
+                        📸 Report a Pothole
+                    </Link>
                 </div>
             </section>
 

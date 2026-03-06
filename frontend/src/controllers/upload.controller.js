@@ -129,24 +129,47 @@ export class UploadController {
         console.error(`[AI Detection Error - ${videoId}]: ${data.toString().trim()}`);
       });
 
-      pythonProcess.on('close', (code) => {
+      pythonProcess.on('close', async (code) => {
         console.log(`[AI Detection - ${videoId}] child process exited with code ${code}`);
         if (code === 0) {
           // ── STEP 2: ML CLUSTERING TRIGGER ──────────────────────────────
+          // Guard: only trigger clustering if this video hasn't already been
+          // clustered. Prevents double-fire on process retries or hot-reloads.
           try {
+            // Re-read upload doc to ensure it hasn't already been clustered
+            const { UploadModel } = require('@/models/upload.model');
+            const uploadDoc = await UploadModel.findByVideoId(videoId);
+            if (uploadDoc && uploadDoc.clustered === true) {
+              console.log(`[Upload] video_id='${videoId}' already clustered — skipping ML trigger.`);
+              return;
+            }
+
             const mlTriggerUrl = `${ML_SERVICE_URL}/ml/clustering/run`;
             console.log(`[Upload] AI complete. Triggering ML clustering at: ${mlTriggerUrl}`);
 
+            // force_recluster is intentionally FALSE here.
+            // DBSCAN will only process detections that are not yet marked processed=true.
+            // The clustering router also has a 409-lock to prevent concurrent runs.
             fetch(mlTriggerUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ video_id: videoId, force_recluster: true })
+              body: JSON.stringify({ video_id: videoId, force_recluster: false })
+            }).then(async (resp) => {
+              if (resp.status === 409) {
+                console.warn(`[Upload] ML clustering for ${videoId} was already running (409). Skipped.`);
+              } else if (!resp.ok) {
+                const err = await resp.text();
+                console.error(`[Upload] ML clustering failed for ${videoId}: ${err}`);
+              } else {
+                console.log(`[Upload] ML clustering completed for ${videoId}.`);
+              }
             }).catch(err => console.error('[Upload] ML Trigger failed (async):', err.message));
           } catch (mlErr) {
             console.error('[Upload] ML Trigger sync error:', mlErr.message);
           }
         } else {
           console.error(`[Upload] AI detection failed for ${videoId}. Skipping clustering.`);
+          const { UploadModel } = require('@/models/upload.model');
           UploadModel.updateStatus(videoId, 'failed');
         }
       });

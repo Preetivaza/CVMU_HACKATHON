@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import clustering, risk, satellite, detections
+from app.routers import clustering, risk, satellite, detections, public_inference
 from app.core.config import settings
 from app.core.database import connect_to_mongo, close_mongo_connection, get_database
 
@@ -40,6 +40,8 @@ app.include_router(satellite.router, prefix="/ml/satellite", tags=["Satellite"])
 # Include the Detections router (For Member 1's AI data)
 app.include_router(detections.router)
 
+# Include the Public Inference router
+app.include_router(public_inference.router)
 
 @app.get("/")
 async def root():

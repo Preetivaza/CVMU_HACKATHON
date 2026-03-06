@@ -62,6 +62,15 @@ export class ClusterController {
       query.geometry = { $geoWithin: { $box: [[minLon, minLat], [maxLon, maxLat]] } };
     }
 
+    // ── Time range filter ────────────────────────────────────────────────
+    const TIME_RANGE_MAP = { '24h': 1, '7d': 7, '30d': 30 };
+    const timeRange = searchParams.get('time_range');
+    if (timeRange && TIME_RANGE_MAP[timeRange]) {
+      const since = new Date();
+      since.setDate(since.getDate() - TIME_RANGE_MAP[timeRange]);
+      query['created_at'] = { $gte: since };
+    }
+
     const { total, items } = await ClusterModel.findWithFilters({ query, page, limit });
 
     return NextResponse.json({
