@@ -4,7 +4,7 @@ detections.py — Detection Ingestion Router
 Handles bulk ingestion of raw detections from Member 1's AI engine.
 Endpoint: POST /api/v1/detections/bulk
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import List, Optional
 from datetime import datetime
 
@@ -16,12 +16,12 @@ from app.services.detections_service import process_bulk_detections
 router = APIRouter(prefix="/api/v1/detections", tags=["Detections"], dependencies=[Depends(verify_api_key)])
 
 @router.post("/bulk")
-async def receive_bulk_detections(payload: DetectionsBulkRequest):
+async def receive_bulk_detections(payload: DetectionsBulkRequest, background_tasks: BackgroundTasks):
     """
     Ingest raw detections from the AI engine (Member 1).
     """
     try:
-        result = await process_bulk_detections(payload)
+        result = await process_bulk_detections(payload, background_tasks)
         
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["message"])

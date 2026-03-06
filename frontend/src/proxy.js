@@ -16,6 +16,7 @@ export function proxy(request) {
         '/api/auth/login',
         '/api/auth/register',
         '/uploads/',
+        '/api/v1/cost/clusters',
     ];
     if (publicPaths.some((p) => pathname.startsWith(p))) {
         return NextResponse.next();
@@ -23,10 +24,18 @@ export function proxy(request) {
 
     // ── 2. All other API routes — require Bearer JWT (or Internal Key) ────────
     if (pathname.startsWith('/api/') && !pathname.startsWith('/api/auth/')) {
+        // Skip auth check for preflight requests
+        if (request.method === 'OPTIONS') {
+            return NextResponse.next();
+        }
+    
         const authHeader = request.headers.get('authorization');
 
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            console.log(`[Middleware] Rejecting ${pathname} - Missing Bearer Token`);
+            console.log(`[Middleware] Rejecting ${request.method} ${pathname} - Missing Bearer Token`, { 
+                headers: Object.fromEntries(request.headers),
+                url: request.url 
+            });
             return NextResponse.json(
                 { error: 'Unauthorized. A valid Bearer token is required.' },
                 { status: 401 }

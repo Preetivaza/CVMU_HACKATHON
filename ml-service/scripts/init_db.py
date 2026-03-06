@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 async def init_db():
     load_dotenv()
     uri = os.getenv("MONGODB_URI")
-    db_name = os.getenv("DATABASE_NAME", "RoadDamageDetaction")
+    db_name = os.getenv("DATABASE_NAME", "road_damage_db")
     
     print(f"Connecting to {db_name}...")
     client = AsyncIOMotorClient(uri)

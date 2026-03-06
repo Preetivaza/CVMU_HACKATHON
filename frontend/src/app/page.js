@@ -7,9 +7,9 @@ import { authFetch } from '@/utils/authFetch';
 const RISK_COLORS = { Critical: '#dc2626', Medium: '#ca8a04', Low: '#16a34a' };
 const RISK_BG = { Critical: '#fee2e2', Medium: '#fefce8', Low: '#f0fdf4' };
 
-// Cost model per damage type (INR in thousands)
-const REPAIR_COSTS = { pothole: 120, crack: 45, patch: 25, depression: 80, unknown: 30 };
-const SEVERITY_MULTIPLIER = { Critical: 2.5, Medium: 1.0, Low: 0.6 };
+// Cost model per damage type (INR in thousands - matching backend: ₹2.5k for pothole)
+const REPAIR_COSTS = { pothole: 2.5, crack: 1.5, patch: 3.5, depression: 5.0, unknown: 3.0 };
+const SEVERITY_MULTIPLIER = { Critical: 3.0, Medium: 1.5, Low: 1.0 };
 
 function StatCard({ icon, color, bg, label, value, sub, href }) {
   const inner = (
@@ -108,6 +108,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState({ totalClusters: 0, critical: 0, repaired: 0, recentUploads: 0 });
   const [clusters, setClusters] = useState([]);
   const [allClusters, setAllClusters] = useState([]);
+  const [costEstimates, setCostEstimates] = useState([]); // [NEW] Added state for cost estimates
   const [loading, setLoading] = useState(true);
   const [processingUploads, setProcessingUploads] = useState([]);
   const [pollWarning, setPollWarning] = useState(false);
@@ -120,13 +121,18 @@ export default function Dashboard() {
     setLoading(true);
     try {
       const trParam = tr !== 'all' ? `&time_range=${tr}` : '';
-      const [debugRes, rankRes, allRes] = await Promise.all([
+      const [debugRes, rankRes, allRes, costRes] = await Promise.all([
         authFetch('/api/v1/debug').then(r => r.json()).catch(() => ({})),
         authFetch(`/api/v1/analytics/priority-ranking?limit=5${trParam}`).then(r => r.json()).catch(() => ({})),
         authFetch(`/api/v1/clusters?limit=500${trParam}`).then(r => r.json()).catch(() => ({})),
+        authFetch(`/api/v1/cost/clusters?limit=100`).then(r => r.json()).catch(() => ({})),
       ]);
 
       const realClustersCount = (allRes.features || []).length || (rankRes.ranking || []).length || (debugRes.data_summary?.clusters_count || 0);
+
+      if (costRes && costRes.clusters) {
+        setCostEstimates(costRes.clusters.filter(c => c.damage_type === 'pothole'));
+      }
 
       if (realClustersCount === 0) {
         // Fallback static data
@@ -137,6 +143,8 @@ export default function Dashboard() {
           { location: { coordinates: [72.8977, 19.0960] }, damage_types: { pothole: 1 }, risk_score: 55, risk_level: 'Medium', status: 'active', temporal_status: 'new', repeat_count: 1 }
         ];
 
+        const critCount = (rankRes.ranking || []).filter(c => (c.risk_level || '').toLowerCase() === 'critical').length;
+        const repaired = (rankRes.ranking || []).filter(c => c.status === 'repaired').length;
         setStats({
           totalClusters: 42 - 12,
           recentUploads: 5,
@@ -162,7 +170,6 @@ export default function Dashboard() {
           const critCount = mappedAllClusters.filter(c => (c.risk_level || '').toLowerCase() === 'critical').length;
           const repaired = mappedAllClusters.filter(c => c.status === 'repaired').length;
           const totalClusters = debugRes.data_summary?.clusters_count || 0;
-
           setStats({
             totalClusters: Math.max(0, totalClusters - repaired),
             recentUploads: debugRes.data_summary?.uploads_count || 0,
@@ -210,9 +217,10 @@ export default function Dashboard() {
   // Reload data when time filter changes
   useEffect(() => { load(timeFilter); }, [timeFilter]); // eslint-disable-line
 
+  // Use the new cost API for accurate total logic
   const healthScore = computeHealthScore(allClusters);
-  const totalCost = estimateRepairCost(allClusters);
-  const critCost = estimateRepairCost(allClusters.filter(c => (c.risk_level || '').toLowerCase() === 'critical'));
+  const totalCost = costEstimates.reduce((sum, c) => sum + (c.estimated_cost || 0), 0) / 1000;
+  const critCost = costEstimates.filter(c => (c.priority_level || '').toLowerCase().includes('p1') || (c.priority_level || '').toLowerCase().includes('immediate') || (c.priority_level || '').toLowerCase().includes('p2')).reduce((sum, c) => sum + (c.estimated_cost || 0), 0) / 1000;
 
   const healthColor = healthScore >= 75 ? '#16a34a' : healthScore >= 50 ? '#ca8a04' : '#dc2626';
   const healthLabel = healthScore >= 75 ? 'Good' : healthScore >= 50 ? 'Fair' : 'Critical';
@@ -333,8 +341,10 @@ export default function Dashboard() {
       {/* Main Content Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20 }}>
 
-        {/* Priority Work Orders */}
-        <div className="panel">
+        {/* Left Column (Tables) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Priority Work Orders */}
+          <div className="panel">
           <div className="panel-header">
             <div>
               <div className="panel-title">Priority Work Orders</div>
@@ -364,7 +374,7 @@ export default function Dashboard() {
                 <tbody>
                   {clusters.map((c, i) => {
                     const types = c.damage_types || {};
-                    const cost = Math.round(estimateRepairCost([c]));
+                    const cost = estimateRepairCost([c]);
                     return (
                       <tr key={i}>
                         <td style={{ fontWeight: 700, color: '#94a3b8' }}>#{i + 1}</td>
@@ -386,7 +396,7 @@ export default function Dashboard() {
                         </td>
                         <td><RiskBadge level={c.risk_level} /></td>
                         <td style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
-                          ₹{cost}K
+                          ₹{cost.toFixed(1)}K
                         </td>
                         <td>
                           <Link href={`/map?id=${c._id || c.cluster_id || ''}`} style={{
@@ -411,7 +421,68 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Right Column */}
+        {/* [NEW] Pothole Estimates Table */}
+        <div className="panel">
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">Pothole Repair Estimates</div>
+              <div className="panel-subtitle">Detailed cost breakdowns via AI estimation</div>
+            </div>
+            <Link href="/map" className="btn btn-secondary btn-sm">View on Map →</Link>
+          </div>
+
+          {loading ? (
+            <div style={{ padding: '48px 20px', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+              Loading cost estimates...
+            </div>
+          ) : costEstimates.length > 0 ? (
+            <div className="table-container" style={{ border: 'none', borderRadius: 0 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Location</th>
+                    <th>Road Type</th>
+                    <th>Repair Method</th>
+                    <th>Priority</th>
+                    <th>Est. Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {costEstimates.map((c, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 700, color: '#94a3b8' }}>#{i + 1}</td>
+                      <td style={{ fontFamily: 'monospace', fontSize: 12, color: '#64748b' }}>
+                        {c.location?.latitude?.toFixed(4)}, {c.location?.longitude?.toFixed(4)}
+                      </td>
+                      <td style={{ textTransform: 'capitalize', fontWeight: 500, color: '#334155' }}>
+                        {c.road_type || 'Unknown'}
+                      </td>
+                      <td style={{ fontSize: 12, color: '#64748b' }}>
+                        {c.repair_method || 'Standard Patch'}
+                      </td>
+                      <td>
+                        <RiskBadge level={c.priority_level === 'High' ? 'Critical' : c.priority_level === 'Medium' ? 'Medium' : 'Low'} />
+                      </td>
+                      <td style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
+                        ₹{(c.estimated_cost).toLocaleString('en-IN')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ padding: '48px 20px', textAlign: 'center' }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>No Potholes Found</div>
+              <div style={{ fontSize: 12, color: '#94a3b8' }}>No active pothole cost estimates available.</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right Column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
 
           {/* Infrastructure Health Score */}
@@ -468,8 +539,8 @@ export default function Dashboard() {
               </div>
               {[
                 { label: 'Critical zones', value: `₹${Math.round(critCost)}K`, color: '#dc2626' },
-                { label: 'Potholes (avg)', value: '₹1.2L each', color: '#ea580c' },
-                { label: 'Cracks (avg)', value: '₹45K each', color: '#ca8a04' },
+                { label: 'Potholes (avg)', value: '₹2.5K each', color: '#ea580c' },
+                { label: 'Cracks (avg)', value: '₹1.5K each', color: '#ca8a04' },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid #f8fafc' }}>
                   <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>{label}</span>

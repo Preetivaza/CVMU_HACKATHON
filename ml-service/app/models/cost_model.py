@@ -75,11 +75,13 @@ class RepairCostModel:
 
     # ── Base costs per damage type (₹) ──────────────────────────────────────
     BASE_COSTS: dict = {
-        "pothole":         8_000.0,
-        "crack":           5_000.0,
-        "surface_failure": 25_000.0,
+        "pothole":         2500.0,
+        "crack":           1500.0,
+        "patch":           3500.0,
+        "depression":      5000.0,
+        "surface_failure": 15000.0,
     }
-    DEFAULT_BASE_COST: float = 6_000.0
+    DEFAULT_BASE_COST: float = 3000.0
 
     # ── Location factors per road type ───────────────────────────────────────
     LOCATION_FACTORS: dict = {
@@ -97,15 +99,23 @@ class RepairCostModel:
     # ── Repair methods (damage_type → {low / high severity}) ─────────────────
     REPAIR_METHODS: dict = {
         "pothole": {
-            "low":  "Bituminous patching (cold mix)",
-            "high": "Full-depth reclamation (hot mix)",
+            "low":  "Cold mix patching",
+            "high": "Hot mix full-depth repair",
         },
         "crack": {
-            "low":  "Crack sealing (hot-pour sealant)",
-            "high": "Micro-surfacing treatment",
+            "low":  "Crack sealing",
+            "high": "Micro-surfacing",
+        },
+        "patch": {
+            "low":  "Surface leveling",
+            "high": "Milling and hot mix replacement",
+        },
+        "depression": {
+            "low":  "Leveling course (DBM)",
+            "high": "Reconstruction of sub-base",
         },
         "surface_failure": {
-            "low":  "Thin overlay (40 mm DBM layer)",
+            "low":  "Thin overlay (DBM)",
             "high": "Full road reconstruction",
         },
     }
