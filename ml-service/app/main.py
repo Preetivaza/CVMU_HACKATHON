@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import clustering, risk, satellite, detections, public_inference
+from app.routers import clustering, risk, satellite, detections, public_inference, cost
 from app.core.config import settings
 from app.core.database import connect_to_mongo, close_mongo_connection, get_database
 
@@ -36,6 +36,7 @@ app.add_middleware(
 app.include_router(clustering.router, prefix="/ml/clustering", tags=["Clustering"])
 app.include_router(risk.router, prefix="/ml/risk", tags=["Risk"])
 app.include_router(satellite.router, prefix="/ml/satellite", tags=["Satellite"])
+app.include_router(cost.router, prefix="/ml/cost", tags=["Cost Estimation"])
 
 # Include the Detections router (For Member 1's AI data)
 app.include_router(detections.router)

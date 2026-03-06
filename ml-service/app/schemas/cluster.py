@@ -87,6 +87,7 @@ class ClusterProperties(BaseModel):
     risk_level: RiskLevel
     repeat_count: int          = 1
     status: RepairStatus       = RepairStatus.PENDING
+    repair_cost: Optional[Dict[str, Any]] = None
     repair_history: List[RepairHistoryEntry] = []
 
 

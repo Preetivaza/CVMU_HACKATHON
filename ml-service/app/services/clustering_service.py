@@ -27,6 +27,7 @@ from app.core.config import settings
 from app.core.database import get_collection, Collections
 from app.models.clustering_model import DBSCANClusteringModel, DAMAGE_TYPE_RADIUS
 from app.models.risk_model import RiskModel
+from app.models.cost_model import RepairCostModel
 from app.services import satellite_service
 
 
@@ -308,6 +309,24 @@ async def run_clustering(
                     (existing["properties"].get("avg_confidence", avg_conf) + avg_conf) / 2, 4
                 )
 
+                # 4e. Calculate Cost
+                cost_result = RepairCostModel.estimate(
+                    damage_type    = damage_type,
+                    severity_score = merged_severity,
+                    road_type      = "local",  # fallback, can be enriched later
+                    risk_score     = risk_result.final_risk_score,
+                )
+                repair_cost_dict = {
+                    "estimated_cost":  cost_result.estimated_cost,
+                    "base_cost":       cost_result.base_cost,
+                    "severity_factor": cost_result.severity_factor,
+                    "location_factor": cost_result.location_factor,
+                    "repair_method":   cost_result.repair_method,
+                    "priority_level":  cost_result.priority_level,
+                    "priority_code":   cost_result.priority_code,
+                    "currency":        cost_result.currency,
+                }
+
                 await clusters_col.update_one(
                     {"_id": existing["_id"]},
                     {"$set": {
@@ -320,6 +339,7 @@ async def run_clustering(
                         "properties.risk_level":       risk_result.risk_level,
                         "properties.temporal_status":  temporal_status,
                         "properties.status":           status, # Updated status
+                        "properties.repair_cost":      repair_cost_dict,
                         "last_detected":               last_detected,
                         "updated_at":                  datetime.utcnow(),
                     }}
@@ -333,6 +353,24 @@ async def run_clustering(
                     asyncio.create_task(satellite_service.run_satellite_analysis(str(cluster_id), list(centroid)))
 
             else:
+                # 4e. Calculate Cost
+                cost_result = RepairCostModel.estimate(
+                    damage_type    = damage_type,
+                    severity_score = avg_severity,
+                    road_type      = "local",  # fallback, can be enriched later
+                    risk_score     = risk_result.final_risk_score,
+                )
+                repair_cost_dict = {
+                    "estimated_cost":  cost_result.estimated_cost,
+                    "base_cost":       cost_result.base_cost,
+                    "severity_factor": cost_result.severity_factor,
+                    "location_factor": cost_result.location_factor,
+                    "repair_method":   cost_result.repair_method,
+                    "priority_level":  cost_result.priority_level,
+                    "priority_code":   cost_result.priority_code,
+                    "currency":        cost_result.currency,
+                }
+
                 # Create new cluster document
                 cluster_doc = {
                     "type":     "Feature",
@@ -353,6 +391,7 @@ async def run_clustering(
                         "repeat_count":     repeat_count,
                         "temporal_status":  temporal_status,
                         "status":           "pending",
+                        "repair_cost":      repair_cost_dict,
                         "repair_history":   [],
                     },
                     "road_id":       None,

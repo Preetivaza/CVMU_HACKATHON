@@ -5,6 +5,19 @@
 #   cluster.py    — clusters, areas, roads, analytics_snapshots
 #   satellite.py  — satellite_analysis
 #   risk.py       — risk calculation I/O
+#   cost_schemas.py — repair cost estimation I/O
+
+# --- cost_schemas.py ---
+from app.schemas.cost_schemas import (
+    DamageTypeEnum,
+    RoadTypeEnum,
+    CostEstimateRequest,
+    BatchCostRequest,
+    CostBreakdown,
+    CostEstimateResult,
+    BatchCostResponse,
+    ClustersCostResponse,
+)
 
 # --- detection.py ---
 from app.schemas.detection import (
