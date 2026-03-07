@@ -1,4 +1,4 @@
-# 🛣️ PathFounders: Road Damage Detection & Management System
+# 🛣️ Sadaksuraksha: Road Damage Detection & Management System
 ### *Hackathon Pitch & Technical Deep-Dive Guide*
 
 ---

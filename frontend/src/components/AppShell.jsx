@@ -44,11 +44,12 @@ const navGroups = [
   },
 ];
 
-// Admin-only nav group
+// Admin-only nav group (visible to city_admin and master_admin)
 const adminNavGroup = {
   label: "Admin",
   items: [
     { href: "/admin", icon: Users, label: "User Management" },
+    { href: "/zones", icon: Layers, label: "Zone Management" },
   ],
 };
 
@@ -122,17 +123,24 @@ export default function AppShell({ children }) {
   const pageTitles = {
     '/': 'Dashboard Overview',
     '/map': 'Live Infrastructure Map',
+    '/analytics': 'Analytics & Reporting',
     '/reports': 'Reports Center',
     '/upload': 'Data Upload',
     '/settings': 'Account Settings',
     '/admin': 'Admin — User Management',
+    '/zones': 'Admin — Zone Management',
+    '/public-report': 'Citizen Report Portal',
   };
   const pageTitle = pageTitles[pathname] || 'SadakSurksha';
-  const isAdmin = user?.role === 'city_admin' || user?.role === 'admin';
+  const isAdmin = ['city_admin', 'master_admin', 'admin'].includes(user?.role);
 
-  const roleLabel = user?.role?.replace('_', ' ') || 'City Admin';
+  const roleLabel = (() => {
+    const base = user?.role?.replace(/_/g, ' ') || 'City Admin';
+    return base.charAt(0).toUpperCase() + base.slice(1);
+  })();
   const displayName = user?.name || user?.email?.split('@')[0] || 'Admin User';
   const initials = displayName.slice(0, 2).toUpperCase();
+  const userZone = user?.authority_zone?.name || user?.authority_zone?.code || null;
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#f1f5f9' }}>
@@ -215,17 +223,22 @@ export default function AppShell({ children }) {
             }}>
               {initials}
             </div>
-            <div style={{ overflow: 'hidden' }}>
-              <div style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {displayName}
+              <div style={{ overflow: 'hidden' }}>
+                <div style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {displayName}
+                </div>
+                <div style={{
+                  color: '#60a5fa', fontSize: 9.5, fontWeight: 600,
+                  textTransform: 'capitalize', letterSpacing: '0.04em',
+                }}>
+                  {roleLabel}
+                </div>
+                {userZone && (
+                  <div style={{ color: '#34d399', fontSize: 9, fontWeight: 600, letterSpacing: '0.04em', marginTop: 1 }}>
+                    📍 {userZone}
+                  </div>
+                )}
               </div>
-              <div style={{
-                color: '#60a5fa', fontSize: 9.5, fontWeight: 600,
-                textTransform: 'capitalize', letterSpacing: '0.04em',
-              }}>
-                {roleLabel}
-              </div>
-            </div>
           </div>
 
           {/* Logout */}

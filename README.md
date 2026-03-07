@@ -97,10 +97,29 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Create a `.env` file in the `ml-service/` directory:
+### Step 2: MongoDB Setup
+- Install MongoDB locally OR use MongoDB Atlas (cloud)
+- Create database: `road_damage_db`
+- Create collections with indexes:
+  ```javascript
+  // Run in MongoDB shell
+  db.raw_detections.createIndex({ "geometry": "2dsphere" });
+  db.clusters.createIndex({ "geometry": "2dsphere" });
+  db.areas.createIndex({ "geometry": "2dsphere" });
+  db.roads.createIndex({ "geometry": "2dsphere" });
+  ```
+
+### Step 3: Environment Variables
 ```env
-MONGODB_URI=mongodb://localhost:27017/road_damage_db
-EE_SERVICE_ACCOUNT=path/to/your/gee-service-account.json
+# frontend/.env.local
+MONGODB_URI=mongodb://localhost:27017/RoadDamageDetaction
+JWT_SECRET=your-secret-key
+FASTAPI_URL=http://localhost:8000
+
+# ml-service/.env
+MONGODB_URI=mongodb://localhost:27017/RoadDamageDetaction
+EE_SERVICE_ACCOUNT=your-gee-service-account.json
+```
 ```
 
 Start the FastAPI server:

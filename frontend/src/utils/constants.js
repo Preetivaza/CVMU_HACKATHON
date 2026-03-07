@@ -10,8 +10,30 @@ export const RISK_LEVELS = ['Low', 'Medium', 'High', 'Critical'];
 // Repair status workflow
 export const REPAIR_STATUSES = ['pending', 'scheduled', 'in_progress', 'repaired', 'verified'];
 
-// User roles
-export const USER_ROLES = ['city_admin', 'zone_officer', 'state_authority', 'contractor', 'viewer'];
+// User roles (ordered from highest to lowest privilege)
+export const USER_ROLES = ['master_admin', 'city_admin', 'zone_officer', 'state_authority', 'contractor', 'viewer'];
+
+// Role hierarchy: maps each role to the roles it's allowed to assign
+export const ROLE_HIERARCHY = {
+  master_admin:    ['city_admin', 'zone_officer', 'state_authority', 'contractor', 'viewer'],
+  city_admin:      ['zone_officer', 'state_authority', 'contractor', 'viewer'],
+  zone_officer:    [],
+  state_authority: [],
+  contractor:      [],
+  viewer:          [],
+};
+
+// Roles that have admin dashboard access
+export const ADMIN_ROLES = ['master_admin', 'city_admin'];
+
+// Email domain → suggested default role (master_admin manually confirms)
+export const EMAIL_DOMAIN_ROLE_MAP = {
+  'amc.gov.in':       'city_admin',
+  'state.gov.in':     'state_authority',
+  'municipality.gov': 'zone_officer',
+  'nhai.gov.in':      'state_authority',
+  'contractor.in':    'contractor',
+};
 
 // Video upload statuses
 export const VIDEO_STATUSES = ['uploaded', 'processing', 'completed', 'failed'];

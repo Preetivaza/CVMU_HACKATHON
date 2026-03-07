@@ -4,7 +4,7 @@
  */
 import { hashPassword, verifyPassword, generateToken, verifyAuth } from '@/lib/auth';
 import { isValidEmail, validatePassword } from '@/utils/validators';
-import { HTTP_STATUS, USER_ROLES } from '@/utils/constants';
+import { HTTP_STATUS, USER_ROLES, EMAIL_DOMAIN_ROLE_MAP } from '@/utils/constants';
 import { UserModel } from '@/models/user.model';
 import { NextResponse } from 'next/server';
 
@@ -42,7 +42,13 @@ export class AuthController {
 
     return NextResponse.json({
       message: 'Login successful',
-      user: { id: user._id.toString(), email: user.email, name: user.name, role: user.role },
+      user: {
+        id: user._id.toString(),
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        authority_zone: user.authority_zone || null,
+      },
       token,
     });
   }
@@ -65,10 +71,18 @@ export class AuthController {
       return NextResponse.json({ error: 'Name must be at least 2 characters' }, { status: HTTP_STATUS.BAD_REQUEST });
     }
 
-    const userRole = role || 'viewer';
+    // Auto-detect role suggestion from email domain
+    const emailDomain = email.split('@')[1]?.toLowerCase() || '';
+    const suggestedRole = EMAIL_DOMAIN_ROLE_MAP[emailDomain] || 'viewer';
+
+    // Requested role must not be higher than suggested (master_admin assigns final role)
+    const userRole = role || suggestedRole;
     if (!USER_ROLES.includes(userRole)) {
       return NextResponse.json({ error: `Invalid role. Must be one of: ${USER_ROLES.join(', ')}` }, { status: HTTP_STATUS.BAD_REQUEST });
     }
+    // New self-registrations can't claim master_admin or city_admin — those require manual assignment
+    const selfRegistrationAllowed = ['zone_officer', 'state_authority', 'contractor', 'viewer'];
+    const finalRole = selfRegistrationAllowed.includes(userRole) ? userRole : 'viewer';
 
     const existing = await UserModel.findByEmail(email);
     if (existing) {
@@ -76,7 +90,7 @@ export class AuthController {
     }
 
     const passwordHash = await hashPassword(password);
-    const newUser = await UserModel.create({ email, passwordHash, name, role: userRole });
+    const newUser = await UserModel.create({ email, passwordHash, name, role: finalRole });
 
     const token = generateToken({
       userId: newUser._id.toString(),
@@ -87,8 +101,15 @@ export class AuthController {
 
     return NextResponse.json({
       message: 'User registered successfully',
-      user: { id: newUser._id.toString(), email: newUser.email, name: newUser.name, role: newUser.role },
+      user: {
+        id: newUser._id.toString(),
+        email: newUser.email,
+        name: newUser.name,
+        role: newUser.role,
+        authority_zone: newUser.authority_zone || null,
+      },
       token,
+      suggested_role: suggestedRole, // Hint for admin to confirm/upgrade
     }, { status: HTTP_STATUS.CREATED });
   }
 
@@ -128,6 +149,16 @@ export class AuthController {
     const fields = {};
     if (body.name && body.name.trim().length >= 2) fields.name = body.name.trim();
     if (body.authority_zone !== undefined) fields.authority_zone = body.authority_zone;
+    if (body.saved_location !== undefined && body.saved_location !== null) {
+      const sl = body.saved_location;
+      if (typeof sl.lat === 'number' && typeof sl.lon === 'number') {
+        fields.saved_location = { lat: sl.lat, lon: sl.lon };
+      }
+    }
+    if (body.drawn_area !== undefined) {
+      // Store the drawn polygon as part of the user's profile
+      fields.drawn_area = body.drawn_area || null;
+    }
 
     await UserModel.updateProfile(user.userId, fields);
     const updatedUser = await UserModel.findById(user.userId, true);

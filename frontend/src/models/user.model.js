@@ -20,15 +20,21 @@ export class UserModel {
     return col.findOne({ _id: new ObjectId(id) }, { projection });
   }
 
+  /** Find user by assigned zone ID (to check occupancy) */
+  static async findByZoneId(zoneId) {
+    const col = await getCollection(COLLECTIONS.USERS);
+    return col.findOne({ 'authority_zone.id': zoneId });
+  }
+
   /** Insert a new user document */
-  static async create({ email, passwordHash, name, role = 'viewer' }) {
+  static async create({ email, passwordHash, name, role = 'viewer', authority_zone = null }) {
     const col = await getCollection(COLLECTIONS.USERS);
     const doc = {
       email: email.toLowerCase(),
       password_hash: passwordHash,
       name: name.trim(),
       role,
-      authority_zone: null,
+      authority_zone, // { id, name, code, geometry } — full zone snapshot, or null
       created_at: new Date(),
       updated_at: new Date(),
     };
