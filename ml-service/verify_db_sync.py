@@ -10,7 +10,7 @@ def main():
     dbs = client.list_database_names()
     print("Databases:", dbs)
     
-    for db_name in ["road_damage_db", "RoadDamageDetaction"]:
+    for db_name in ["road_damage_db"]:
         if db_name in dbs:
             print(f"\nCollections in {db_name}:")
             db = client[db_name]

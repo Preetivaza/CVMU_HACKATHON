@@ -103,6 +103,7 @@ export class AnalyticsController {
       first_detected: cluster.first_detected,
       last_detected:  cluster.last_detected,
       damage_types:   cluster.properties.damage_types,
+      repair_cost:    cluster.properties.repair_cost,
     }));
 
     const [totalPending, totalCritical, totalHigh] = await Promise.all([
