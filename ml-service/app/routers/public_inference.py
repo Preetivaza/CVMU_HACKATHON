@@ -16,6 +16,7 @@ except ImportError:
 # model = YOLO("path/to/best.pt")
 
 from app.core.database import get_collection, Collections
+from app.services.yolo_service import yolo_service
 
 router = APIRouter(prefix="/api/v1/public", tags=["Public Report"])
 
@@ -44,22 +45,23 @@ async def infer_public_image(file: UploadFile = File(...)):
         print(f"Error reading image: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid image file. {str(e)}")
 
-    # --- MOCK YOLO DETECTIONS FOR DEMO / IF MODEL NOT PRESENT ---
-    # In production, replace this block with:
-    # results = model(img)
-    # detections = parse_results(results)
-    
-    # We will simulate detecting 1 pothole at the center
-    cx, cy = int(width / 2), int(height / 2)
-    w, h = int(width * 0.3), int(height * 0.3)
-    
-    detections = [
-        {
-            "class_name": "pothole",
-            "confidence": 0.89,
-            "bbox": [int(cx - w/2), int(cy - h/2), int(cx + w/2), int(cy + h/2)] # xmin, ymin, xmax, ymax
-        }
-    ]
+    # --- REAL YOLO DETECTIONS via yolo_service ---
+    try:
+        detections = yolo_service.infer_image(img)
+    except Exception as e:
+        print(f"YOLO inference error: {e}")
+        # Graceful fallback or rejection if model fails
+        raise HTTPException(status_code=500, detail="AI Service is currently unavailable.")
+        
+    # Validation Layer
+    if len(detections) == 0:
+        # No damage found, let's verify if it's actually a road
+        if not yolo_service.is_road_image(img):
+            raise HTTPException(
+                status_code=400, 
+                detail="Image rejected: No road or damage features detected. Please upload a clear photo of the road."
+            )
+        # If it is a road but has no damage, it proceeds with an empty detections list!
     # ------------------------------------------------------------
     
     # Draw bounding boxes on the image for preview
