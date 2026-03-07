@@ -212,34 +212,7 @@ export default function AdminPage() {
                 </div>
             </div>
 
-            {/* Role Privilege Info Banner */}
-            <div style={{
-                background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)',
-                borderRadius: 12, padding: '16px 20px', marginBottom: 24,
-                display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
-            }}>
-                <span style={{ fontSize: 24 }}>🔐</span>
-                <div style={{ flex: 1 }}>
-                    <div style={{ color: '#e0e7ff', fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Role Privilege System</div>
-                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                        {[
-                            { role: 'master_admin', label: 'All data, assigns all roles' },
-                            { role: 'city_admin', label: 'All risks visible' },
-                            { role: 'zone_officer', label: 'Their zone only' },
-                            { role: 'state_authority', label: 'Highways only' },
-                            { role: 'contractor', label: 'Assigned roads only' },
-                        ].map(({ role, label }) => {
-                            const c = ROLE_COLORS[role];
-                            return (
-                                <div key={role} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <RoleBadge role={role} />
-                                    <span style={{ color: '#c7d2fe', fontSize: 11 }}>{label}</span>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            </div>
+
 
             {/* Message */}
             {msg && (

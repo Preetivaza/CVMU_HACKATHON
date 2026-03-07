@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react
 import dynamic from 'next/dynamic';
 import { authFetch } from '@/utils/authFetch';
 import { useSearchParams } from 'next/navigation';
+import { calculateEstimation } from '@/utils/estimation';
 
 const MapComponent = dynamic(() => import('@/components/MapComponent'), {
   ssr: false,
@@ -65,6 +66,7 @@ function MapContent() {
   const [saveMsg, setSaveMsg] = useState(null);
   const [saving, setSaving] = useState(false);
   const [areaSaveMsg, setAreaSaveMsg] = useState(null);
+  const [roadCategory, setRoadCategory] = useState('MDR'); // Default to Urban Road
   const debounceRef = useRef(null);
   const searchParams = useSearchParams();
   const highlightId = searchParams.get('id');
@@ -216,18 +218,100 @@ function MapContent() {
     }
   };
 
-  const riskCounts = ['Critical', 'Medium', 'Low'].reduce((acc, l) => {
-    acc[l] = clusters.filter(c => (c.properties?.risk_level || '').toLowerCase() === l.toLowerCase()).length;
-    return acc;
-  }, {});
+  const handleExportBoQ = (est) => {
+    if (!est) return;
+    const printWindow = window.open('', '_blank', 'width=920,height=720');
+    if (!printWindow) { alert('Please allow popups to export the BoQ PDF.'); return; }
+
+    const refCode = 'SADAK-' + Math.random().toString(36).substr(2, 7).toUpperCase();
+    const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    const noteText = est.verificationRequired
+      ? 'Mandatory verification by a jurisdictional Junior Engineer (JE) is required before fund allocation. AI confidence is below the NHAI auto-pass threshold.'
+      : 'Detection confidence meets the NHAI high-confidence threshold. This BoQ is cleared for immediate tender processing or contractor assignment.';
+    const contingency = est.costs.contingency != null ? est.costs.contingency : Math.round(est.costs.subtotal * 0.05);
+    const confColor = est.confidence > 90 ? '#16a34a' : '#ea580c';
+    const confBg = est.confidence > 90 ? '#f0fdf4' : '#fff7ed';
+
+    const html = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>'
+      + '<title>BoQ Report &mdash; ' + est.id.slice(-6).toUpperCase() + '</title>'
+      + '<style>'
+      + '@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap");'
+      + '*{box-sizing:border-box;margin:0;padding:0}'
+      + 'body{font-family:Inter,system-ui,sans-serif;background:#fff;color:#1e293b;padding:44px 48px;font-size:13px;line-height:1.6}'
+      + '.hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:3px solid #0f172a;margin-bottom:26px}'
+      + '.hdr h1{font-size:21px;font-weight:800;color:#0f172a;letter-spacing:-0.02em}'
+      + '.hdr p{font-size:10.5px;color:#64748b;text-transform:uppercase;font-weight:600;letter-spacing:.06em;margin-top:4px}'
+      + '.badge{background:#0f172a;color:#fff;font-size:13px;font-weight:800;padding:8px 16px;border-radius:6px;text-align:center;line-height:1.5}'
+      + '.badge small{display:block;font-size:9px;letter-spacing:.1em;opacity:.65;font-weight:600}'
+      + '.grid{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-bottom:26px}'
+      + '.blk h4{font-size:9px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.12em;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #f1f5f9}'
+      + '.blk p{margin-bottom:5px;font-size:12.5px;color:#334155}'
+      + '.blk p strong{color:#0f172a}'
+      + '.cb{display:inline-block;background:' + confBg + ';color:' + confColor + ';border:1px solid ' + (est.confidence > 90 ? '#bbf7d0' : '#fed7aa') + ';border-radius:4px;padding:1px 8px;font-weight:800;font-size:11px}'
+      + 'table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:20px}'
+      + 'thead tr{background:#f8fafc}'
+      + 'th{padding:10px 12px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#64748b;border:1px solid #e2e8f0}'
+      + 'td{padding:10px 12px;border:1px solid #e2e8f0;color:#334155;vertical-align:top}'
+      + '.tr-tot td{background:#0f172a;color:#fff;font-weight:800;font-size:13.5px;border-color:#0f172a}'
+      + '.note{background:#f8fafc;border-left:4px solid ' + confColor + ';padding:14px 16px;border-radius:0 8px 8px 0;font-size:12px;color:#475569;margin-bottom:26px}'
+      + '.note strong{color:#0f172a;display:block;margin-bottom:3px}'
+      + '.footer{display:flex;justify-content:space-between;font-size:10px;color:#94a3b8;padding-top:14px;border-top:1px solid #f1f5f9}'
+      + '.print-btn{display:flex;gap:10px;justify-content:center;margin-bottom:28px}'
+      + '.print-btn button{padding:10px 26px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer}'
+      + '.print-btn .p{background:#2563eb;color:#fff}'
+      + '.print-btn .c{background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0}'
+      + '@media print{.print-btn{display:none!important}body{padding:20px 24px}}'
+      + '</style></head><body>'
+      + '<div class="hdr"><div><h1>Projected Bill of Quantities (BoQ)</h1><p>DARPAN AI Infrastructure Dashboard &mdash; Road Safety Module</p></div>'
+      + '<div class="badge">NHAI / PWD<small>SOR 2025-26</small></div></div>'
+      + '<div class="grid">'
+      + '<div class="blk"><h4>Detection Context</h4>'
+      + '<p>Road Damage ID: <strong>#' + est.id.slice(-6).toUpperCase() + '</strong></p>'
+      + '<p>Damage Classification: <strong>' + est.damageType + '</strong></p>'
+      + '<p>GPS Coordinates: <strong>' + est.coordinates + '</strong></p>'
+      + '<p>AI Confidence: <span class="cb">' + est.confidence + '% &mdash; ' + (est.confidence > 90 ? 'Verified High' : 'Verify Recommended') + '</span></p></div>'
+      + '<div class="blk"><h4>Maintenance Parameters</h4>'
+      + '<p>Road Category: <strong>' + est.roadCategory + '</strong></p>'
+      + '<p>Location Multiplier: <strong>' + est.multiplierLoc + 'x</strong></p>'
+      + '<p>Repair Method: <strong>' + est.repairMethod + '</strong></p>'
+      + '<p>Assessment Date: <strong>' + dateStr + '</strong></p></div></div>'
+      + '<table><thead><tr>'
+      + '<th style="width:38%">Item Description</th><th style="width:22%">Specification</th>'
+      + '<th style="width:13%">Qty / Unit</th><th style="width:12%">Rate (&#8377;)</th><th style="width:15%">Amount (&#8377;)</th>'
+      + '</tr></thead><tbody>'
+      + '<tr><td><strong>Surface Repair: ' + est.damageType + '</strong><br/><span style="font-size:11px;color:#64748b">Rectification of localized road surface failure</span></td>'
+      + '<td>' + est.repairMethod + '</td><td>' + est.quantity + ' ' + est.unit + '</td>'
+      + '<td>&#8377;' + Number(est.baseRate).toLocaleString('en-IN') + '</td>'
+      + '<td>&#8377;' + Number(est.costs.subtotal).toLocaleString('en-IN') + '</td></tr>'
+      + '<tr><td>Location Premium (' + est.roadCategory + ' Multiplier: ' + est.multiplierLoc + 'x)</td><td>SOR Clause 3.2</td><td>&mdash;</td><td>' + est.multiplierLoc + 'x</td><td>Included</td></tr>'
+      + '<tr><td>Labour, Plant &amp; Equipment Charges</td><td>PWD Standard Slab</td><td>&mdash;</td><td>15%</td><td>&#8377;' + Number(est.costs.labor).toLocaleString('en-IN') + '</td></tr>'
+      + '<tr><td>GST (CGST 9% + SGST 9%)</td><td>GST Act 2017</td><td>&mdash;</td><td>18%</td><td>&#8377;' + Number(est.costs.gst).toLocaleString('en-IN') + '</td></tr>'
+      + '<tr><td>Contingencies &amp; Traffic Management</td><td>IRC:SP:55</td><td>&mdash;</td><td>5%</td><td>&#8377;' + Number(contingency).toLocaleString('en-IN') + '</td></tr>'
+      + '<tr class="tr-tot"><td colspan="4" style="text-align:right;letter-spacing:.04em">TOTAL ESTIMATED PROJECT COST</td><td>&#8377;' + Number(est.costs.grandTotal).toLocaleString('en-IN') + '</td></tr>'
+      + '</tbody></table>'
+      + '<div class="note"><strong>Engineer\'s Recommendation</strong>' + noteText + '</div>'
+      + '<div class="print-btn">'
+      + '<button class="p" onclick="window.print()">&#128438; Print / Save as PDF</button>'
+      + '<button class="c" onclick="window.close()">Close</button></div>'
+      + '<div class="footer"><span>Generated by DARPAN AI Road Damage Detection System &mdash; v2.0</span><span>Ref: ' + refCode + '</span></div>'
+      + '</body></html>';
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
+  const riskCounts = {
+    Critical: clusters.filter(c => (c.properties?.risk_level||'').toLowerCase()==='critical').length,
+    Medium: clusters.filter(c => (c.properties?.risk_level||'').toLowerCase()==='medium').length,
+    Low: clusters.filter(c => (c.properties?.risk_level||'').toLowerCase()==='low').length,
+  };
 
   const scopeInfo = getScopeInfo(currentUser);
   const selectedId = selected?.properties?._id || selected?._id || highlightId;
 
   return (
     <div style={{ height: 'calc(100vh - 116px)', display: 'flex', flexDirection: 'column', gap: 0 }} className="fade-in">
-
-      {/* ─── Top Bar ──────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexShrink: 0 }}>
         <div>
           <p className="page-eyebrow">Live Infrastructure</p>
@@ -237,64 +321,28 @@ function MapContent() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 20, padding: '5px 14px',
-          }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 20, padding: '5px 14px' }}>
             <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', animation: 'pulse-dot 2s ease-in-out infinite' }} />
             <span style={{ fontSize: 11, fontWeight: 800, color: '#15803d', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Live</span>
           </div>
           <button onClick={load} className="btn btn-secondary btn-sm">🔄 Refresh</button>
-          {/* Zone Officer Pick Location Button */}
           {currentUser?.role === 'zone_officer' && (
-            <button
-              onClick={() => { setPickMode(p => !p); setPickedCoord(null); }}
-              style={{
-                padding: '7px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
-                background: pickMode ? '#dc2626' : '#1d4ed8',
-                color: 'white', fontSize: 12, fontWeight: 700, transition: 'all 0.2s',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}
-            >
+            <button onClick={() => { setPickMode(p => !p); setPickedCoord(null); }} style={{ padding: '7px 14px', borderRadius: 20, border: 'none', cursor: 'pointer', background: pickMode ? '#dc2626' : '#1d4ed8', color: 'white', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
               📍 {pickMode ? 'Cancel Pick' : 'Pin My Location'}
             </button>
           )}
-          <button
-            onClick={() => setShowHeatmap(h => !h)}
-            style={{
-              padding: '7px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
-              background: showHeatmap ? '#7c3aed' : '#f1f5f9',
-              color: showHeatmap ? 'white' : '#64748b',
-              fontSize: 12, fontWeight: 700, transition: 'all 0.2s',
-            }}
-          >
+          <button onClick={() => setShowHeatmap(h => !h)} style={{ padding: '7px 14px', borderRadius: 20, border: 'none', cursor: 'pointer', background: showHeatmap ? '#7c3aed' : '#f1f5f9', color: showHeatmap ? 'white' : '#64748b', fontSize: 12, fontWeight: 700 }}>
             🌡️ {showHeatmap ? 'Heatmap ON' : 'Heatmap OFF'}
           </button>
         </div>
       </div>
-
-      {/* ─── Main Layout ──────────────────────────────────────────── */}
       <div style={{ flex: 1, display: 'flex', gap: 16, minHeight: 0 }}>
-
-        {/* ─── Left Sidebar ─── */}
         <div style={{ width: 272, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
-
-          {/* Risk Filter */}
           <div className="panel" style={{ flexShrink: 0 }}>
             <div style={{ padding: '10px 10px 6px', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
               {['All', 'Critical', 'Medium', 'Low'].map(f => (
-                <button
-                  key={f}
-                  onClick={() => setRiskFilter(f)}
-                  style={{
-                    flex: 1, minWidth: 40, padding: '5px 4px', borderRadius: 6, border: 'none',
-                    background: riskFilter === f ? (f === 'Critical' ? '#dc2626' : f === 'Medium' ? '#ca8a04' : f === 'Low' ? '#16a34a' : '#2563eb') : '#f1f5f9',
-                    color: riskFilter === f ? 'white' : '#64748b',
-                    fontSize: 10, fontWeight: 800, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.04em',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  {f === 'All' ? `All\n(${clusters.length})` : `${f}\n(${riskCounts[f] || 0})`}
+                <button key={f} onClick={() => setRiskFilter(f)} style={{ flex: 1, minWidth: 40, padding: '5px 4px', borderRadius: 6, border: 'none', background: riskFilter === f ? (f === 'Critical' ? '#dc2626' : f === 'Medium' ? '#ca8a04' : f === 'Low' ? '#16a34a' : '#2563eb') : '#f1f5f9', color: riskFilter === f ? 'white' : '#64748b', fontSize: 10, fontWeight: 800, cursor: 'pointer', textTransform: 'uppercase' }}>
+                  {f === 'All' ? 'All (' + clusters.length + ')' : f + ' (' + (riskCounts[f] || 0) + ')'}
                 </button>
               ))}
             </div>
@@ -487,6 +535,60 @@ function MapContent() {
                   <div style={{ fontSize: 16, fontWeight: 800, color: '#0369a1' }}>{Math.round(selected.properties.aging_index * 100)}%</div>
                 </div>
               )}
+
+              {/* Cost Estimation (The Request) */}
+              <div style={{ marginBottom: 18, padding: '12px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: '#64748b', letterSpacing: '0.08em', textTransform: 'uppercase' }}>💰 Budget Estimate (SOR)</div>
+                  <select 
+                    value={roadCategory} 
+                    onChange={(e) => setRoadCategory(e.target.value)}
+                    style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', outline: 'none' }}
+                  >
+                    <option value="MDR">MDR (City)</option>
+                    <option value="NH">Expressway/NH</option>
+                    <option value="PMGSY">Rural Road</option>
+                  </select>
+                </div>
+
+                {(() => {
+                  const est = calculateEstimation(selected, roadCategory);
+                  if (!est) return null;
+                  if (est.auditMode) {
+                    return (
+                      <div style={{ fontSize: 11, color: '#dc2626', fontWeight: 600, background: '#fee2e2', padding: '10px', borderRadius: 6 }}>
+                        ⚠️ Audit Mode: Low AI Confidence ({est.confidence}%). Manual inspection required before estimation.
+                      </div>
+                    );
+                  }
+                  return (
+                    <>
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: 11, color: '#64748b' }}>Projected Area:</span>
+                          <span style={{ fontSize: 11, fontWeight: 700 }}>{est.quantity} {est.unit}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: 11, color: '#64748b' }}>Estimated Budget:</span>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: '#16a34a' }}>₹{est.costs.grandTotal.toLocaleString()}</span>
+                        </div>
+                      </div>
+                      <button 
+                         onClick={() => handleExportBoQ(est)}
+                         style={{ 
+                           width: '100%', padding: '8px', borderRadius: 6, border: '1px solid #2563eb', 
+                           background: '#fff', color: '#2563eb', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                           transition: 'all 0.2s'
+                         }}
+                         onMouseEnter={e => { e.currentTarget.style.background = '#2563eb'; e.currentTarget.style.color = 'white'; }}
+                         onMouseLeave={e => { e.currentTarget.style.background = 'white'; e.currentTarget.style.color = '#2563eb'; }}
+                      >
+                         📑 Export Detailed BoQ (PDF)
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
 
               {/* Status Feedback */}
               {statusMsg && (
