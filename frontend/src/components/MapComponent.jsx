@@ -272,6 +272,53 @@ export default function MapComponent({ clusters = [], detections = [], onCluster
         {showHeatmap && <HeatmapLayer clusters={clusters} />}
         <FlyToSelected cluster={highlightedCluster} />
 
+        {/* 1. Render Raw Unclustered Detections (e.g. from public uploads) */}
+        {detections.map((det, i) => {
+          if (!det.geometry?.coordinates) return null;
+          // Only render isolated points (or all points if preferred, but public reports have processed=false)
+          // To prevent double-rendering, we only show points that aren't in a cluster yet,
+          // or we just show them distinctively.
+          if (det.cluster_id || det.processed) return null;
+
+          const coords = [det.geometry.coordinates[1], det.geometry.coordinates[0]];
+          const p = det.properties || {};
+          const damageType = p.damage_type || (p.classes && p.classes[0]) || 'other';
+          const conf = p.confidence || (p.scores && p.scores[0]) || 0;
+
+          return (
+            <Marker key={det._id || `det-${i}`} position={coords} icon={createDamageIcon(damageType)}>
+              <Popup maxWidth={220}>
+                <div style={{ fontFamily: 'system-ui, sans-serif', fontSize: 13, minWidth: 180 }}>
+                  <div style={{
+                    background: '#eff6ff', color: '#1d4ed8', padding: '4px 8px', borderRadius: 4,
+                    fontSize: 10, fontWeight: 800, textTransform: 'uppercase', marginBottom: 8,
+                    display: 'inline-block'
+                  }}>
+                    Single Report
+                  </div>
+                  <div style={{ fontWeight: 700, color: '#0f172a', textTransform: 'capitalize', marginBottom: 6 }}>
+                    {damageType}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b', marginBottom: 4 }}>
+                    <span>Confidence:</span>
+                    <span style={{ fontWeight: 600, color: '#0369a1' }}>{Math.round(conf * 100)}%</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b', marginBottom: 4 }}>
+                    <span>Source:</span>
+                    <span style={{ fontWeight: 600, color: '#334155', textTransform: 'capitalize' }}>
+                      {p.source ? p.source.replace('_', ' ') : 'Upload'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 8, fontStyle: 'italic' }}>
+                    Awaiting verification & clustering
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+
+        {/* 2. Render Verified Clusters */}
         {clusters.map((cluster, i) => {
           const level = cluster.properties?.risk_level || 'Low';
           const col = RISK_COLORS[level] || RISK_COLORS.Low;
