@@ -97,22 +97,22 @@ def calculate_severity_score(confidence, bbox_area_ratio, damage_type):
 # Uncomment this function and replace "normalized_acceleration": 0.0 with
 # "normalized_acceleration": simulate_acceleration(det["damage_type"]) to enable.
 #
-# import random
-#
-# ACCEL_RANGES = {
-#     "pothole": (0.6, 0.9),     # Strong bump — car physically drops into the hole
-#     "crack":   (0.1, 0.4),     # Mild vibration — rough surface under tires
-#     "patch":   (0.05, 0.15),   # Very slight — uneven but repaired surface
-#     "other":   (0.0, 0.1),     # Negligible
-# }
-#
-# def simulate_acceleration(damage_type):
-#     """
-#     Simulates normalized accelerometer reading (0.0 - 1.0) based on damage type.
-#     In production, this would come from the phone's accelerometer via the app.
-#     """
-#     low, high = ACCEL_RANGES.get(damage_type, (0.0, 0.1))
-#     return round(random.uniform(low, high), 2)
+import random
+
+ACCEL_RANGES = {
+    "pothole": (0.6, 0.9),     # Strong bump — car physically drops into the hole
+    "crack":   (0.1, 0.4),     # Mild vibration — rough surface under tires
+    "patch":   (0.05, 0.15),   # Very slight — uneven but repaired surface
+    "other":   (0.0, 0.1),     # Negligible
+}
+
+def simulate_acceleration(damage_type):
+    """
+    Simulates normalized accelerometer reading (0.0 - 1.0) based on damage type.
+    In production, this would come from the phone's accelerometer via the app.
+    """
+    low, high = ACCEL_RANGES.get(damage_type, (0.0, 0.1))
+    return round(random.uniform(low, high), 2)
 
 def main():
     print(f"Loading YOLO model from {MODEL_PATH}...")
@@ -260,8 +260,8 @@ def main():
                 "damage_type": det["damage_type"],
                 "confidence": det["confidence"],
                 "bbox_area_ratio": det["bbox_area_ratio"],
-                "normalized_acceleration": 0.0,
-                # "normalized_acceleration": simulate_acceleration(det["damage_type"]),
+                # "normalized_acceleration": 0.0,
+                "normalized_acceleration": simulate_acceleration(det["damage_type"]),
                 "severity_score": det["severity_score"],
                 "confidence_level": det["confidence_level"],
                 "vehicle_speed": det["speed_kmh"],
