@@ -5,9 +5,12 @@
 import { NextResponse } from 'next/server';
 import { AreaModel } from '@/models/area.model';
 import { HTTP_STATUS, PAGINATION } from '@/utils/constants';
+import { verifyAuth } from '@/lib/auth';
+import { UserModel } from '@/models/user.model';
+import { getDataFilter } from '@/utils/rbac';
 
 export class AreaController {
-  /** GET /api/v1/areas — heatmap grid data with filters */
+  /** GET /api/v1/areas — heatmap grid data with filters (role-filtered) */
   static async list(request) {
     const { searchParams } = new URL(request.url);
     const page  = parseInt(searchParams.get('page'))  || PAGINATION.DEFAULT_PAGE;
@@ -35,6 +38,19 @@ export class AreaController {
       };
     }
 
+    // --- ROLE-BASED DATA MASKING ---
+    const { isValid, user: tokenUser } = await verifyAuth(request);
+    if (isValid) {
+      const user = await UserModel.findById(tokenUser.userId);
+      const roleFilter = getDataFilter(user);
+      // If zone_officer has a geometry filter, it overrides the bbox (their zone IS their viewport)
+      if (roleFilter.geometry) {
+        query.geometry = roleFilter.geometry;
+      } else {
+        Object.assign(query, roleFilter);
+      }
+    }
+
     const { total, items } = await AreaModel.findWithFilters({ query, page, limit });
 
     return NextResponse.json({
@@ -44,3 +60,4 @@ export class AreaController {
     });
   }
 }
+

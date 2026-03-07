@@ -1,9 +1,9 @@
 # MongoDB Configuration
-MONGODB_URI="mongodb+srv://preetivaza_db_user:Preeti123@cluster0.qkevtym.mongodb.net/?appName=Cluster0&retryWrites=true&w=majority&tlsAllowInvalidCertificates=true"
+MONGODB_URI="mongodb+srv://preetivaza_db_user:Preeti123@cluster0.qkevtym.mongodb.net/?appName=Cluster0&retryWrites=true&w=majority"
 DATABASE_NAME="road_damage_db"
 
-# CORS Origins (comma-separated)
-CORS_ORIGINS='["http://localhost:3000", "http://127.0.0.1:3000"]'
+# CORS Origins (comma-separated json array)
+CORS_ORIGINS='["http://localhost:3000","http://127.0.0.1:3000"]'
 
 # DBSCAN Clustering Configuration
 DBSCAN_EPS_METERS=10.0
@@ -17,4 +17,8 @@ RISK_WEIGHT_AGING_REPEAT=0.4
 REPEAT_THRESHOLD=3
 
 # Google Earth Engine (leave empty if not configured)
-GEE_SERVICE_ACCOUNT=
+GEE_SERVICE_ACCOUNT=gee-service-account.json
+
+# API Key for secure M2M communication
+API_KEY="member1-secret-key"
+  

@@ -55,6 +55,7 @@ export const COLLECTIONS = {
   CLUSTERS: 'clusters',
   AREAS: 'areas',
   ROADS: 'roads',
+  ZONES: 'zones',
   SATELLITE_ANALYSIS: 'satellite_analysis',
   ANALYTICS_SNAPSHOTS: 'analytics_snapshots',
 };

@@ -9,6 +9,8 @@ import { validateDetection } from '@/utils/validators';
 import { HTTP_STATUS, PAGINATION } from '@/utils/constants';
 import { DetectionModel } from '@/models/detection.model';
 import { UploadModel } from '@/models/upload.model';
+import { verifyAuth } from '@/lib/auth';
+import { UserModel } from '@/models/user.model';
 
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || 'sadaksurksha_internal_ml_service_2026';
 
@@ -18,18 +20,26 @@ export class DetectionController {
     // ── Auth: Accept either user JWT (via middleware) or internal service key ─
     const internalKey = request.headers.get('x-internal-key');
     const isInternalCall = INTERNAL_API_KEY && internalKey === INTERNAL_API_KEY;
+    
+    let tokenUser = null;
     if (!isInternalCall) {
-      // Check for user auth if not an internal service call
-      const authHeader = request.headers.get('authorization');
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const { isValid, user } = await verifyAuth(request);
+      if (!isValid) {
         return NextResponse.json({ error: 'Unauthorized. A valid Bearer token or X-Internal-Key is required.' }, { status: HTTP_STATUS.UNAUTHORIZED });
       }
+      tokenUser = user;
     }
     // ─────────────────────────────────────────────────────────────────────────
 
     const body = await request.json();
     let originalDetections = [];
     let videoId = null;
+
+    // Fetch full user if this is a zone_officer to get their geometry
+    let dbUser = null;
+    if (tokenUser && tokenUser.role === 'zone_officer') {
+      dbUser = await UserModel.findById(tokenUser.userId);
+    }
 
     if (Array.isArray(body)) {
       originalDetections = body;
@@ -92,6 +102,28 @@ export class DetectionController {
             created_at: new Date(),
           };
         }
+        // Check zone boundaries if this is a zone_officer
+        if (dbUser && dbUser.authority_zone?.geometry?.coordinates) {
+          const coords = detection.geometry?.coordinates || 
+                        [props.longitude || props.lon, props.latitude || props.lat];
+          
+          if (coords[0] && coords[1]) {
+            const polygon = dbUser.authority_zone.geometry.coordinates[0]; // Exterior ring
+            let inside = false;
+            for (let ii = 0, jj = polygon.length - 1; ii < polygon.length; jj = ii++) {
+              const xi = polygon[ii][0], yi = polygon[ii][1];
+              const xj = polygon[jj][0], yj = polygon[jj][1];
+              const intersect = ((yi > coords[1]) !== (yj > coords[1])) &&
+                (coords[0] < (xj - xi) * (coords[1] - yi) / (yj - yi) + xi);
+              if (intersect) inside = !inside;
+            }
+            if (!inside) {
+              validationErrors.push({ index: i, errors: [`Coordinate [${coords[1]}, ${coords[0]}] is outside your assigned zone: ${dbUser.authority_zone.name}`] });
+              continue; 
+            }
+          }
+        }
+
         validDetections.push(doc);
       }
     }

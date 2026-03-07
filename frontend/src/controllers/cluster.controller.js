@@ -14,6 +14,7 @@ import { HTTP_STATUS, REPAIR_STATUSES, PAGINATION, ML_SERVICE_URL } from '@/util
 import { isValidObjectId } from '@/utils/validators';
 import { verifyAuth } from '@/lib/auth';
 import { UserModel } from '@/models/user.model';
+import { getDataFilter } from '@/utils/rbac';
 
 export class ClusterController {
   /** GET /api/v1/clusters */
@@ -26,24 +27,12 @@ export class ClusterController {
     if (searchParams.get('risk_level')) query['properties.risk_level'] = searchParams.get('risk_level');
     if (searchParams.get('status')) query['properties.status'] = searchParams.get('status');
 
-    // --- SMART DATA MASKING (Member 3 Requirement) ---
+    // --- ROLE-BASED DATA MASKING ---
     const { isValid, user: tokenUser } = await verifyAuth(request);
     if (isValid) {
       const user = await UserModel.findById(tokenUser.userId);
-
-      if (user.role === 'zone_officer' && user.authority_zone) {
-        // Only see risks within their assigned Polygon/Ward
-        query.geometry = {
-          $geoWithin: { $geometry: user.authority_zone }
-        };
-      } else if (user.role === 'state_authority') {
-        // State level only cares about Highways
-        query['road_type'] = 'highway';
-      } else if (user.role === 'contractor') {
-        // Contractors only see roads they are assigned to
-        query['properties.assigned_to_user_id'] = user._id.toString();
-      }
-      // city_admin sees everything (no additional filter)
+      const roleFilter = getDataFilter(user);
+      Object.assign(query, roleFilter);
     }
 
     const minScore = parseFloat(searchParams.get('min_risk_score'));
