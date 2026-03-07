@@ -35,6 +35,15 @@ const DAMAGE_COLORS = {
   depression: '#a855f7', other: '#6b7280',
 };
 
+function createDamageIcon(damageType) {
+  const color = DAMAGE_COLORS[damageType] || DAMAGE_COLORS.other;
+  const html = `
+    <div style="width:12px;height:12px;border-radius:50%;background:${color};
+      border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>
+  `;
+  return L.divIcon({ html, className: '', iconSize: [12, 12], iconAnchor: [6, 6] });
+}
+
 const TILE_LAYERS = {
   satellite: {
     label: '🛰 Satellite',
