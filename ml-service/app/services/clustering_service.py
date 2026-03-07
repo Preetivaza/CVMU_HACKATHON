@@ -198,6 +198,7 @@ async def run_clustering(
             # ── ROAD CHECK (Member 3 Requirement) ──────────────────────────────────
             # Step A: Distance to Road Centerline
             on_road = True
+            road_type_detected = "local" # Default fallback
             try:
                 roads_col = get_collection(Collections.ROADS)
                 road_count = await roads_col.estimated_document_count()
@@ -214,6 +215,8 @@ async def run_clustering(
                     if not nearby_road:
                         on_road = False
                         print(f"[Clustering]   ⚠ Centroid {centroid} > 10m from road. Discarding as Noise.")
+                    else:
+                        road_type_detected = nearby_road.get("properties", {}).get("road_type", "local")
                 
                 # Step B: Satellite-Aided Verification (Sentinel-1/2) 
                 # If distance is borderline or we want higher assurance
@@ -313,7 +316,7 @@ async def run_clustering(
                 cost_result = RepairCostModel.estimate(
                     damage_type    = damage_type,
                     severity_score = merged_severity,
-                    road_type      = "local",  # fallback, can be enriched later
+                    road_type      = road_type_detected,
                     risk_score     = risk_result.final_risk_score,
                 )
                 repair_cost_dict = {
@@ -357,7 +360,7 @@ async def run_clustering(
                 cost_result = RepairCostModel.estimate(
                     damage_type    = damage_type,
                     severity_score = avg_severity,
-                    road_type      = "local",  # fallback, can be enriched later
+                    road_type      = road_type_detected,
                     risk_score     = risk_result.final_risk_score,
                 )
                 repair_cost_dict = {

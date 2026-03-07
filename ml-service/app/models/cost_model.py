@@ -133,6 +133,14 @@ class RepairCostModel:
         (0.00, 4, "P4 – Routine (within 30 days)"),
     ]
 
+    # ── Priority bumps (risk score boost per road type) ──────────────────────
+    PRIORITY_BUMPS: dict = {
+        "highway":   0.25, # Serious bump for highways (will almost surely put it in Critical/High)
+        "arterial":  0.15,
+        "collector": 0.05,
+        "local":     0.00,
+    }
+
     # ── Cost rounding (nearest ₹) ────────────────────────────────────────────
     ROUND_NEAREST: int = 100
 
@@ -164,14 +172,17 @@ class RepairCostModel:
         return methods[severity_key]
 
     @classmethod
-    def get_priority_level(cls, risk_score: float) -> tuple:
+    def get_priority_level(cls, risk_score: float, road_type: str = "local") -> tuple:
         """
-        Map a risk score to a priority level.
+        Map a risk score to a priority level, considering road type bumps.
         Returns (priority_label, priority_code).
         Falls back to the severity score if risk_score is not provided.
         """
+        bump = cls.PRIORITY_BUMPS.get(road_type.lower().strip(), 0.0)
+        adjusted_score = risk_score + bump
+
         for threshold, code, label in cls.PRIORITY_LEVELS:
-            if risk_score >= threshold:
+            if adjusted_score >= threshold:
                 return label, code
         return cls.PRIORITY_LEVELS[-1][2], cls.PRIORITY_LEVELS[-1][1]
 
@@ -214,7 +225,7 @@ class RepairCostModel:
 
         # ── Repair metadata ──────────────────────────────────────────────────
         repair_method              = cls.get_repair_method(damage_type, severity)
-        priority_label, priority_code = cls.get_priority_level(risk)
+        priority_label, priority_code = cls.get_priority_level(risk, road_type)
 
         formula = (
             f"₹{base_cost:,.0f} × {severity_factor} (severity) × "

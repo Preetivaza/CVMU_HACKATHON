@@ -366,6 +366,7 @@ export default function Dashboard() {
                     <th>Location</th>
                     <th>Damage Type</th>
                     <th>Risk Score</th>
+                    <th>Road Type</th>
                     <th>Priority</th>
                     <th>Est. Cost</th>
                     <th>Action</th>
@@ -393,6 +394,9 @@ export default function Dashboard() {
                             </div>
                             <span style={{ fontWeight: 800, color: '#0f172a', fontSize: 13 }}>{Math.round((c.risk_score || 0) * 100)}%</span>
                           </div>
+                        </td>
+                        <td style={{ textTransform: 'capitalize', fontSize: 12, fontWeight: 500, color: '#334155' }}>
+                          {c.repair_cost?.road_type || 'Local'}
                         </td>
                         <td><RiskBadge level={c.risk_level} /></td>
                         <td style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
