@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { authFetch } from '@/utils/authFetch';
 import { useSearchParams } from 'next/navigation';
@@ -96,7 +96,7 @@ function StatusBtn({ status, current, onClick }) {
   );
 }
 
-export default function MapPage() {
+function MapContent() {
   const [clusters, setClusters] = useState([]);
   const [detections, setDetections] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -107,6 +107,7 @@ export default function MapPage() {
   const [msg, setMsg] = useState(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const debounceRef = useRef(null);
+  
   const searchParams = useSearchParams();
   const highlightId = searchParams.get('id');
 
@@ -128,7 +129,7 @@ export default function MapPage() {
           return f;
         });
         setClusters(mapped);
-        // Auto-select the highlighted cluster from the ?id= param
+        
         if (highlightId) {
           const match = mapped.find(c =>
             (c.properties?._id === highlightId) ||
@@ -147,12 +148,11 @@ export default function MapPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Debounced re-fetch when timeFilter changes (300ms)
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => load(timeFilter), 300);
     return () => clearTimeout(debounceRef.current);
-  }, [timeFilter]); // eslint-disable-line
+  }, [timeFilter]); 
 
   const filtered = filter === 'All'
     ? clusters
@@ -193,8 +193,6 @@ export default function MapPage() {
 
   return (
     <div style={{ height: 'calc(100vh - 60px - 56px)', display: 'flex', flexDirection: 'column', gap: 0 }} className="fade-in">
-
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexShrink: 0 }}>
         <div>
           <p className="page-eyebrow">Live Infrastructure</p>
@@ -228,11 +226,7 @@ export default function MapPage() {
       </div>
 
       <div style={{ flex: 1, display: 'flex', gap: 20, minHeight: 0 }}>
-
-        {/* Left Sidebar — Filters + Cluster List */}
         <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
-
-          {/* Risk Filter */}
           <div className="panel">
             <div className="panel-header" style={{ borderBottom: '1px solid #f1f5f9', padding: '12px 16px' }}>
               <div className="panel-title" style={{ fontSize: 13 }}>🎯 Filter by Risk Level</div>
@@ -265,7 +259,6 @@ export default function MapPage() {
             </div>
           </div>
 
-          {/* Cluster List */}
           <div className="panel" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div className="panel-header" style={{ borderBottom: '1px solid #f1f5f9', padding: '12px 16px', flexShrink: 0 }}>
               <div className="panel-title" style={{ fontSize: 13 }}>📋 Cluster List</div>
@@ -313,12 +306,10 @@ export default function MapPage() {
           </div>
         </div>
 
-        {/* Main Map */}
         <div style={{ flex: 1, borderRadius: 12, overflow: 'hidden', position: 'relative', minWidth: 0 }}>
           <MapComponent clusters={filtered} detections={detections} onClusterClick={setSelected} showHeatmap={showHeatmap} selectedId={highlightId} />
         </div>
 
-        {/* Right Sidebar — Cluster Detail */}
         {selected && (
           <div className="panel slide-right" style={{
             width: 320, flexShrink: 0, overflowY: 'auto',
@@ -334,7 +325,6 @@ export default function MapPage() {
             </div>
 
             <div style={{ padding: '18px' }}>
-              {/* Risk Level */}
               <div style={{ marginBottom: 18 }}>
                 <RiskBadge level={selected.properties?.risk_level} />
                 <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginTop: 8 }}>
@@ -353,7 +343,6 @@ export default function MapPage() {
                 </div>
               </div>
 
-              {/* Stats Grid */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
                 {[
                   { label: 'Overall Risk Index', value: `${Math.round((selected.properties?.final_risk_score || 0) * 100)}%` },
@@ -369,7 +358,6 @@ export default function MapPage() {
                 ))}
               </div>
 
-              {/* Message */}
               {msg && (
                 <div style={{
                   padding: '10px 12px', borderRadius: 8, marginBottom: 14,
@@ -382,7 +370,6 @@ export default function MapPage() {
                 </div>
               )}
 
-              {/* Status Update */}
               <div style={{ marginBottom: 18 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>
                   Update Status
@@ -399,7 +386,6 @@ export default function MapPage() {
                 </div>
               </div>
 
-              {/* Timeline */}
               {selected.first_detected && (
                 <div style={{ padding: '12px', background: '#f8fafc', borderRadius: 8, border: '1px solid #f1f5f9' }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
@@ -415,5 +401,17 @@ export default function MapPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function MapPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b' }}>
+        Loading Map Data...
+      </div>
+    }>
+      <MapContent />
+    </Suspense>
   );
 }
